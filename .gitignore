@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+.env
+db.sqlite3
+backend/data/
+*.db
+
+# Node
+node_modules/
+dist/
+.DS_Store
+
+# Docker
+.dockerignore
+
+# IDEs
+.vscode/
+.idea/
+.kiro/
+.pytest_cache/

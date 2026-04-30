@@ -1,0 +1,26 @@
+services:
+  backend:
+    build: ./backend
+    container_name: bb-backend
+    restart: unless-stopped
+    environment:
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production-please}
+      - JWT_EXPIRATION_MINUTES=120
+      - DATABASE_URL=sqlite:///./data/bugbounty.db
+      - ALLOWED_ORIGINS=*
+    volumes:
+      - bb-data:/app/data
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build: ./frontend
+    container_name: bb-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  bb-data:
