@@ -15,17 +15,17 @@ RUN git clone --depth 1 https://github.com/sullo/nikto.git /opt/nikto \
 # nuclei (pre-built binary)
 RUN NUCLEI_VERSION=$(curl -sSL https://api.github.com/repos/projectdiscovery/nuclei/releases/latest | grep tag_name | cut -d'"' -f4 | tr -d v) \
     && curl -sSL "https://github.com/projectdiscovery/nuclei/releases/download/v${NUCLEI_VERSION}/nuclei_${NUCLEI_VERSION}_linux_amd64.zip" -o /tmp/nuclei.zip \
-    && unzip /tmp/nuclei.zip -d /usr/local/bin/ && rm /tmp/nuclei.zip
+    && unzip -o /tmp/nuclei.zip -d /usr/local/bin/ && rm /tmp/nuclei.zip
 
 # httpx (pre-built binary)
 RUN HTTPX_VERSION=$(curl -sSL https://api.github.com/repos/projectdiscovery/httpx/releases/latest | grep tag_name | cut -d'"' -f4 | tr -d v) \
     && curl -sSL "https://github.com/projectdiscovery/httpx/releases/download/v${HTTPX_VERSION}/httpx_${HTTPX_VERSION}_linux_amd64.zip" -o /tmp/httpx.zip \
-    && unzip /tmp/httpx.zip -d /usr/local/bin/ && rm /tmp/httpx.zip
+    && unzip -o /tmp/httpx.zip -d /usr/local/bin/ && rm /tmp/httpx.zip
 
 # subfinder (pre-built binary)
 RUN SUBFINDER_VERSION=$(curl -sSL https://api.github.com/repos/projectdiscovery/subfinder/releases/latest | grep tag_name | cut -d'"' -f4 | tr -d v) \
     && curl -sSL "https://github.com/projectdiscovery/subfinder/releases/download/v${SUBFINDER_VERSION}/subfinder_${SUBFINDER_VERSION}_linux_amd64.zip" -o /tmp/subfinder.zip \
-    && unzip /tmp/subfinder.zip -d /usr/local/bin/ && rm /tmp/subfinder.zip
+    && unzip -o /tmp/subfinder.zip -d /usr/local/bin/ && rm /tmp/subfinder.zip
 
 # gobuster (pre-built binary)
 RUN GOBUSTER_VERSION=$(curl -sSL https://api.github.com/repos/OJ/gobuster/releases/latest | grep tag_name | cut -d'"' -f4 | tr -d v) \
