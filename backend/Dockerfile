@@ -30,29 +30,27 @@ RUN SUBFINDER_VERSION=$(curl -sSL https://api.github.com/repos/projectdiscovery/
 # gobuster (pre-built binary)
 RUN GOBUSTER_VERSION=$(curl -sSL https://api.github.com/repos/OJ/gobuster/releases/latest | grep tag_name | cut -d'"' -f4 | tr -d v) \
     && curl -sSL "https://github.com/OJ/gobuster/releases/download/v${GOBUSTER_VERSION}/gobuster_Linux_x86_64.tar.gz" -o /tmp/gobuster.tar.gz \
-    && tar -xzf /tmp/gobuster.tar.gz -C /usr/local/bin/ gobuster && rm /tmp/gobuster.tar.gz
+    && tar -xzf /tmp/gobuster.tar.gz -C /usr/local/bin/ && rm /tmp/gobuster.tar.gz
 
 # ffuf (pre-built binary)
 RUN FFUF_VERSION=$(curl -sSL https://api.github.com/repos/ffuf/ffuf/releases/latest | grep tag_name | cut -d'"' -f4 | tr -d v) \
     && curl -sSL "https://github.com/ffuf/ffuf/releases/download/v${FFUF_VERSION}/ffuf_${FFUF_VERSION}_linux_amd64.tar.gz" -o /tmp/ffuf.tar.gz \
-    && tar -xzf /tmp/ffuf.tar.gz -C /usr/local/bin/ ffuf && rm /tmp/ffuf.tar.gz
+    && tar -xzf /tmp/ffuf.tar.gz -C /usr/local/bin/ && rm /tmp/ffuf.tar.gz
 
 # gau (pre-built binary)
 RUN GAU_VERSION=$(curl -sSL https://api.github.com/repos/lc/gau/releases/latest | grep tag_name | cut -d'"' -f4 | tr -d v) \
     && curl -sSL "https://github.com/lc/gau/releases/download/v${GAU_VERSION}/gau_${GAU_VERSION}_linux_amd64.tar.gz" -o /tmp/gau.tar.gz \
-    && tar -xzf /tmp/gau.tar.gz -C /usr/local/bin/ gau && rm /tmp/gau.tar.gz
+    && tar -xzf /tmp/gau.tar.gz -C /usr/local/bin/ && rm /tmp/gau.tar.gz
 
-# dalfox (pre-built binary)
-RUN DALFOX_VERSION=$(curl -sSL https://api.github.com/repos/hahwul/dalfox/releases/latest | grep tag_name | cut -d'"' -f4 | tr -d v) \
-    && curl -sSL "https://github.com/hahwul/dalfox/releases/download/v${DALFOX_VERSION}/dalfox_${DALFOX_VERSION}_linux_amd64.tar.gz" -o /tmp/dalfox.tar.gz \
-    && tar -xzf /tmp/dalfox.tar.gz -C /usr/local/bin/ dalfox && rm /tmp/dalfox.tar.gz
+# dalfox - skip for now, can be added later via go install
+# XSS scanning will be handled by nuclei templates
 
 # Python security tools
 RUN pip install --no-cache-dir sqlmap wafw00f 2>/dev/null || true
 
-# Ruby security tools (whatweb, wpscan)
-RUN gem install whatweb --no-document 2>/dev/null || true
-RUN gem install wpscan --no-document 2>/dev/null || true
+# Ruby security tools (whatweb, wpscan) - optional, may fail
+RUN gem install whatweb --no-document 2>/dev/null || echo "whatweb skipped"
+RUN gem install wpscan --no-document 2>/dev/null || echo "wpscan skipped"
 
 # Create wordlist directory with common wordlist
 RUN mkdir -p /usr/share/wordlists \
