@@ -12,7 +12,8 @@ import {
   Search, 
   Globe, 
   ShieldCheck,
-  Package
+  Package,
+  FolderOpen
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -254,7 +255,7 @@ export default function ProgramsPage() {
               
               <div className="p-4 bg-slate-900/80 border-t border-slate-800 flex justify-between items-center gap-3">
                 <Link 
-                  to={`/programs/${p.id}`} 
+                  to={`/app/programs/${p.id}`} 
                   className="flex-1 inline-flex justify-center items-center px-4 py-2 bg-slate-800 text-slate-200 text-sm font-medium rounded-lg hover:bg-slate-700 hover:text-white transition-colors"
                 >
                   Подробнее

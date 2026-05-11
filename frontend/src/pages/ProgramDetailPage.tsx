@@ -72,13 +72,13 @@ export default function ProgramDetailPage() {
         
         <div className="flex w-full md:w-auto items-center gap-3">
           <Link 
-            to="/programs" 
+            to="/app/programs" 
             className="flex items-center justify-center px-4 py-2 rounded-lg text-sm font-medium bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700 transition-all w-full md:w-auto shrink-0"
           >
             <ArrowLeft className="w-4 h-4 mr-2" /> Назад
           </Link>
           <Link 
-            to={`/programs/${id}/chat`} 
+            to={`/app/programs/${id}/chat`} 
             className="flex items-center justify-center px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-500 shadow-lg shadow-blue-500/20 transition-all w-full md:w-auto shrink-0"
           >
             <Bot className="w-4 h-4 mr-2" /> ИИ-Ассистент

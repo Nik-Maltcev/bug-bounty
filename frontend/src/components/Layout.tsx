@@ -14,13 +14,13 @@ import {
 import clsx from 'clsx';
 
 const navItems = [
-  { to: '/', label: 'Дашборд', icon: LayoutDashboard },
-  { to: '/programs', label: 'Программы', icon: FolderOpen },
-  { to: '/scans', label: 'Сканирования', icon: Search },
-  { to: '/vulnerabilities', label: 'Уязвимости', icon: ShieldAlert },
-  { to: '/reports', label: 'Отчёты', icon: FileText },
-  { to: '/compliance', label: 'Комплаенс', icon: ShieldCheck },
-  { to: '/audit', label: 'Аудит', icon: ListOrdered },
+  { to: '/app', label: 'Дашборд', icon: LayoutDashboard },
+  { to: '/app/programs', label: 'Программы', icon: FolderOpen },
+  { to: '/app/scans', label: 'Сканирования', icon: Search },
+  { to: '/app/vulnerabilities', label: 'Уязвимости', icon: ShieldAlert },
+  { to: '/app/reports', label: 'Отчёты', icon: FileText },
+  { to: '/app/compliance', label: 'Комплаенс', icon: ShieldCheck },
+  { to: '/app/audit', label: 'Аудит', icon: ListOrdered },
 ];
 
 export default function Layout() {
@@ -44,7 +44,7 @@ export default function Layout() {
         
         <div className="flex-1 py-6 px-3 overflow-y-auto space-y-1 scrollbar-thin scrollbar-thumb-slate-800">
           {navItems.map((item) => {
-            const isActive = location.pathname === item.to || (item.to !== '/' && location.pathname.startsWith(item.to));
+            const isActive = location.pathname === item.to || (item.to !== '/app' && location.pathname.startsWith(item.to));
             return (
               <NavLink
                 key={item.to}

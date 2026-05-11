@@ -29,7 +29,7 @@ export default function ChatPage() {
           </div>
         </div>
         <Link 
-          to={`/programs/${programId}`}
+          to={`/app/programs/${programId}`}
           className="flex items-center px-4 py-2 text-sm font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors"
         >
           <ArrowLeft className="w-4 h-4 mr-2" />

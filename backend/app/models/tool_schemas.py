@@ -84,6 +84,13 @@ class ScanPlan(BaseModel):
     execution_order: list[str] = []
     estimated_duration_minutes: int | None = None
 
+    # AI-Driven Scan (Stage 2) настройки
+    enable_ai_stage2: bool = False
+    ai_supervised_mode: bool = False
+    ai_max_iterations: int = 3
+    ai_max_requests: int = 50
+    ai_rate_limit: float = 5.0
+
 
 class SafetyStatus(BaseModel):
     """Текущее состояние слоя безопасности."""

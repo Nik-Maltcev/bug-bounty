@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
-import { Shield, Lock, User, ArrowRight, Loader2 } from 'lucide-react';
+import { Shield, Lock, User, ArrowRight, Loader2, ShieldAlert } from 'lucide-react';
 import clsx from 'clsx';
 
 export default function LoginPage() {
@@ -14,7 +14,7 @@ export default function LoginPage() {
     e.preventDefault();
     try {
       await login({ username, password });
-      navigate('/');
+      navigate('/app');
     } catch {
       // error is set in useAuth
     }

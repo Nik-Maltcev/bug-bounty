@@ -40,6 +40,12 @@ class StartScanRequest(BaseModel):
     """Запрос на запуск сканирования."""
     asset_id: str
     check_types: list[str] = []
+    # AI-Driven Scan (Stage 2) настройки
+    enable_ai_stage2: bool = False
+    ai_supervised_mode: bool = False
+    ai_max_iterations: int = 3
+    ai_max_requests: int = 50
+    ai_rate_limit: float = 5.0
 
 
 def _asset_db_to_schema(row: AssetDB) -> Asset:
@@ -241,4 +247,94 @@ def get_scan_plan(
         ],
         "execution_order": plan.execution_order,
         "estimated_duration_minutes": plan.estimated_duration_minutes,
+        "enable_ai_stage2": plan.enable_ai_stage2,
+        "ai_supervised_mode": plan.ai_supervised_mode,
+        "ai_max_iterations": plan.ai_max_iterations,
+        "ai_max_requests": plan.ai_max_requests,
+        "ai_rate_limit": plan.ai_rate_limit,
+    }
+
+
+class CreateScanPlanRequest(BaseModel):
+    """Запрос на создание плана сканирования."""
+    asset_id: str
+    enable_ai_stage2: bool = False
+    ai_supervised_mode: bool = False
+    ai_max_iterations: int = 3
+    ai_max_requests: int = 50
+    ai_rate_limit: float = 5.0
+
+
+@router.post("/api/programs/{program_id}/scan-plan")
+def create_scan_plan(
+    program_id: str,
+    body: CreateScanPlanRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Создаёт план сканирования с настройками Stage 2.
+
+    Возвращает план без запуска сканирования.
+    """
+    # Проверяем программу
+    program = db.query(Program).filter(Program.id == program_id).first()
+    if program is None:
+        raise HTTPException(status_code=404, detail="Программа не найдена")
+
+    # Проверяем актив
+    asset_row = db.query(AssetDB).filter(
+        AssetDB.id == body.asset_id,
+        AssetDB.program_id == program_id,
+    ).first()
+    if asset_row is None:
+        raise HTTPException(status_code=404, detail="Актив не найден")
+
+    asset = _asset_db_to_schema(asset_row)
+
+    compliance_manager = ComplianceManager()
+    rules = compliance_manager.load_program_rules(program_id, db)
+
+    # Convert to Pydantic models
+    from app.models.schemas import ProgramRule as ProgramRuleSchema
+    rule_schemas = [
+        ProgramRuleSchema(
+            id=r.id,
+            description=r.description,
+            is_allowed=r.is_allowed,
+            category=r.category,
+        )
+        for r in rules
+    ]
+
+    # Получаем effective rate limit
+    effective_rate = compliance_manager.get_effective_rate_limit(
+        program_id, db, body.ai_rate_limit
+    )
+
+    plan = _orchestrator.create_scan_plan(
+        asset=asset,
+        rules=rule_schemas,
+        enable_ai_stage2=body.enable_ai_stage2,
+        ai_supervised_mode=body.ai_supervised_mode,
+        ai_max_iterations=body.ai_max_iterations,
+        ai_max_requests=body.ai_max_requests,
+        ai_rate_limit=effective_rate,
+    )
+
+    return {
+        "scan_id": plan.scan_id,
+        "asset_type": plan.asset_type.value,
+        "target": plan.target,
+        "tools": plan.tools,
+        "excluded_tools": [
+            {"tool_name": et.tool_name, "reason": et.reason}
+            for et in plan.excluded_tools
+        ],
+        "execution_order": plan.execution_order,
+        "estimated_duration_minutes": plan.estimated_duration_minutes,
+        "enable_ai_stage2": plan.enable_ai_stage2,
+        "ai_supervised_mode": plan.ai_supervised_mode,
+        "ai_max_iterations": plan.ai_max_iterations,
+        "ai_max_requests": plan.ai_max_requests,
+        "ai_rate_limit": plan.ai_rate_limit,
     }
