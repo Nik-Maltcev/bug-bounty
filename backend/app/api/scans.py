@@ -2,12 +2,18 @@
 
 Содержит:
 - POST /api/programs/{program_id}/scans — запуск сканирования
+- POST /api/scans/quick — быстрое сканирование по URL
+- GET /api/scans — список всех сканирований
 - GET /api/scans/{scan_id} — статус сканирования
 - GET /api/scans/{scan_id}/progress — прогресс сканирования
 - GET /api/programs/{program_id}/assets — активы программы
 
 Требования: 4.1, 4.2, 2.1
 """
+
+import uuid
+from datetime import datetime
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -72,7 +78,115 @@ def _scan_to_response(scan: Scan) -> dict:
         "started_at": scan.started_at.isoformat() if scan.started_at else None,
         "completed_at": scan.completed_at.isoformat() if scan.completed_at else None,
         "findings_count": len(scan.vulnerabilities) if scan.vulnerabilities else 0,
+        "target_url": scan.target_url if hasattr(scan, 'target_url') else None,
     }
+
+
+class QuickScanRequest(BaseModel):
+    """Запрос на быстрое сканирование по URL."""
+    target_url: str
+    scan_type: str = "web"  # web, api, full
+
+
+@router.post("/api/scans/quick", status_code=201)
+def quick_scan(
+    body: QuickScanRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Быстрое сканирование по URL без создания программы.
+    
+    Создаёт временную программу и актив, запускает сканирование.
+    """
+    # Валидация URL
+    try:
+        parsed = urlparse(body.target_url)
+        if not parsed.scheme or not parsed.netloc:
+            raise ValueError("Invalid URL")
+        target_url = body.target_url
+        domain = parsed.netloc
+    except Exception:
+        raise HTTPException(status_code=400, detail="Некорректный URL")
+
+    # Создаём временную программу
+    program_id = str(uuid.uuid4())
+    program = Program(
+        id=program_id,
+        name=f"Quick Scan: {domain}",
+        platform="quick_scan",
+        url=target_url,
+        raw_text="",
+        is_archived=False,
+    )
+    db.add(program)
+
+    # Создаём актив
+    asset_id = str(uuid.uuid4())
+    asset_type = "api" if body.scan_type == "api" else "web"
+    asset_db = AssetDB(
+        id=asset_id,
+        program_id=program_id,
+        name=domain,
+        asset_type=asset_type,
+        target=target_url,
+        in_scope=True,
+        notes=f"Quick scan target: {target_url}",
+    )
+    db.add(asset_db)
+    db.commit()
+
+    asset = Asset(
+        id=asset_id,
+        name=domain,
+        asset_type=AssetType(asset_type),
+        target=target_url,
+        in_scope=True,
+        notes=f"Quick scan target: {target_url}",
+    )
+
+    scan_config = ScanConfig(
+        asset_id=asset_id,
+        program_id=program_id,
+        check_types=[],
+    )
+
+    compliance_manager = ComplianceManager()
+    rules = compliance_manager.load_program_rules(program_id, db)
+
+    progress = _scanner.start_scan(asset, scan_config, compliance_manager, rules, db)
+
+    return {
+        "scan_id": progress.scan_id,
+        "status": progress.status.value,
+        "current_stage": progress.current_stage,
+        "percent_complete": progress.percent_complete,
+        "findings_count": progress.findings_count,
+        "target_url": target_url,
+    }
+
+
+@router.get("/api/scans")
+def list_scans(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict]:
+    """Список всех сканирований."""
+    scans = db.query(Scan).order_by(Scan.started_at.desc()).offset(offset).limit(limit).all()
+    
+    result = []
+    for scan in scans:
+        scan_dict = _scan_to_response(scan)
+        # Добавляем target_url из актива
+        if scan.asset_id:
+            asset = db.query(AssetDB).filter(AssetDB.id == scan.asset_id).first()
+            if asset:
+                scan_dict["target_url"] = asset.target
+                scan_dict["target_name"] = asset.name
+        result.append(scan_dict)
+    
+    return result
 
 
 @router.post("/api/programs/{program_id}/scans", status_code=201)

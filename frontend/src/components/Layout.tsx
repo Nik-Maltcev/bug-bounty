@@ -2,11 +2,9 @@ import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import {
   LayoutDashboard,
-  FolderOpen,
   Search,
   ShieldAlert,
   FileText,
-  ShieldCheck,
   ListOrdered,
   LogOut,
   Shield
@@ -15,11 +13,9 @@ import clsx from 'clsx';
 
 const navItems = [
   { to: '/app', label: 'Дашборд', icon: LayoutDashboard },
-  { to: '/app/programs', label: 'Программы', icon: FolderOpen },
   { to: '/app/scans', label: 'Сканирования', icon: Search },
   { to: '/app/vulnerabilities', label: 'Уязвимости', icon: ShieldAlert },
   { to: '/app/reports', label: 'Отчёты', icon: FileText },
-  { to: '/app/compliance', label: 'Комплаенс', icon: ShieldCheck },
   { to: '/app/audit', label: 'Аудит', icon: ListOrdered },
 ];
 

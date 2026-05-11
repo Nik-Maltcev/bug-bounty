@@ -80,6 +80,8 @@ export interface ScanRecord {
   started_at: string | null;
   completed_at: string | null;
   findings_count: number;
+  target_url?: string;
+  target_name?: string;
 }
 
 export interface Vulnerability {

@@ -108,6 +108,19 @@ export async function listProgramAssets(programId: string): Promise<Asset[]> {
 
 // --- Scans API ---
 
+export async function quickScan(targetUrl: string, scanType: string = 'web'): Promise<ScanProgress & { target_url: string }> {
+  const res = await api.post<ScanProgress & { target_url: string }>('/api/scans/quick', {
+    target_url: targetUrl,
+    scan_type: scanType,
+  });
+  return res.data;
+}
+
+export async function listScans(limit: number = 50, offset: number = 0): Promise<ScanRecord[]> {
+  const res = await api.get<ScanRecord[]>('/api/scans', { params: { limit, offset } });
+  return res.data;
+}
+
 export async function startScan(programId: string, assetId: string, checkTypes: string[] = []): Promise<ScanProgress> {
   const res = await api.post<ScanProgress>(`/api/programs/${programId}/scans`, {
     asset_id: assetId,
