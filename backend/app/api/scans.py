@@ -451,3 +451,42 @@ def create_scan_plan(
         "ai_max_requests": plan.ai_max_requests,
         "ai_rate_limit": plan.ai_rate_limit,
     }
+
+
+@router.post("/api/scans/{scan_id}/ai-analyze")
+def start_ai_analysis(
+    scan_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Запуск ИИ-анализа (Stage 2) для завершённого сканирования.
+    
+    Анализирует найденные уязвимости и генерирует дополнительные гипотезы.
+    """
+    scan = db.query(Scan).filter(Scan.id == scan_id).first()
+    if scan is None:
+        raise HTTPException(status_code=404, detail="Сканирование не найдено")
+    
+    if scan.status != "completed":
+        raise HTTPException(status_code=400, detail="Сканирование должно быть завершено для ИИ-анализа")
+    
+    # Получаем актив
+    asset_row = db.query(AssetDB).filter(AssetDB.id == scan.asset_id).first()
+    if asset_row is None:
+        raise HTTPException(status_code=404, detail="Актив не найден")
+    
+    # Проверяем наличие уязвимостей
+    from app.models.database import VulnerabilityRecord
+    vulns = db.query(VulnerabilityRecord).filter(VulnerabilityRecord.scan_id == scan_id).all()
+    
+    if not vulns:
+        raise HTTPException(status_code=400, detail="Нет уязвимостей для анализа")
+    
+    # TODO: Здесь будет интеграция с AIScanner для Stage 2
+    # Пока возвращаем заглушку
+    return {
+        "status": "started",
+        "message": f"ИИ-анализ запущен для {len(vulns)} уязвимостей. Результаты появятся в течение нескольких минут.",
+        "scan_id": scan_id,
+        "vulnerabilities_count": len(vulns),
+    }

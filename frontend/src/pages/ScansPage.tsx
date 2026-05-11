@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { quickScan, listScans, getScanProgress } from '../services/api';
 import type { ScanRecord, ScanProgress } from '../types';
 import { 
@@ -338,7 +339,11 @@ export default function ScansPage() {
         ) : (
           <div className="divide-y divide-slate-800/50">
             {scans.map((scan) => (
-              <div key={scan.id} className="p-4 hover:bg-slate-800/30 transition-colors">
+              <Link 
+                key={scan.id} 
+                to={`/app/scans/${scan.id}`}
+                className="block p-4 hover:bg-slate-800/30 transition-colors"
+              >
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex items-start gap-3 min-w-0">
                     {getStatusIcon(scan.status)}
@@ -347,14 +352,9 @@ export default function ScansPage() {
                         {scan.target_name || scan.target_url || `Scan ${scan.id.slice(0, 8)}`}
                       </p>
                       {scan.target_url && (
-                        <a 
-                          href={scan.target_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-sm text-slate-500 hover:text-blue-400 truncate block"
-                        >
+                        <p className="text-sm text-slate-500 truncate">
                           {scan.target_url}
-                        </a>
+                        </p>
                       )}
                     </div>
                   </div>
@@ -392,7 +392,7 @@ export default function ScansPage() {
                     Найдено уязвимостей: {scan.findings_count}
                   </p>
                 )}
-              </div>
+              </Link>
             ))}
           </div>
         )}

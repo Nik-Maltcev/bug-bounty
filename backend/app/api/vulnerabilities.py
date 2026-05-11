@@ -175,10 +175,11 @@ def list_vulnerabilities(
     severity: str | None = Query(None),
     asset_type: str | None = Query(None),
     status: str | None = Query(None),
+    scan_id: str | None = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[dict]:
-    """Список уязвимостей с фильтрацией по серьёзности, типу актива, статусу."""
+    """Список уязвимостей с фильтрацией по серьёзности, типу актива, статусу, scan_id."""
     from app.models.database import Scan
 
     q = db.query(VulnerabilityRecord)
@@ -187,6 +188,8 @@ def list_vulnerabilities(
         q = q.filter(VulnerabilityRecord.severity == severity)
     if status is not None:
         q = q.filter(VulnerabilityRecord.status == status)
+    if scan_id is not None:
+        q = q.filter(VulnerabilityRecord.scan_id == scan_id)
     if asset_type is not None:
         q = q.join(Scan, VulnerabilityRecord.scan_id == Scan.id).join(
             AssetDB, Scan.asset_id == AssetDB.id

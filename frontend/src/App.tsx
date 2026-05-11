@@ -8,7 +8,9 @@ import DashboardPage from './pages/DashboardPage';
 import ProgramsPage from './pages/ProgramsPage';
 import ProgramDetailPage from './pages/ProgramDetailPage';
 import ScansPage from './pages/ScansPage';
+import ScanDetailPage from './pages/ScanDetailPage';
 import VulnerabilitiesPage from './pages/VulnerabilitiesPage';
+import VulnerabilityDetailPage from './pages/VulnerabilityDetailPage';
 import ReportsPage from './pages/ReportsPage';
 import AuditLogPage from './pages/AuditLogPage';
 import CompliancePage from './pages/CompliancePage';
@@ -50,7 +52,9 @@ export default function App() {
           <Route path="programs/:id" element={<ProgramDetailPage />} />
           <Route path="programs/:id/chat" element={<ChatPage />} />
           <Route path="scans" element={<ScansPage />} />
+          <Route path="scans/:id" element={<ScanDetailPage />} />
           <Route path="vulnerabilities" element={<VulnerabilitiesPage />} />
+          <Route path="vulnerabilities/:id" element={<VulnerabilityDetailPage />} />
           <Route path="reports" element={<ReportsPage />} />
           <Route path="audit" element={<AuditLogPage />} />
           <Route path="compliance" element={<CompliancePage />} />
