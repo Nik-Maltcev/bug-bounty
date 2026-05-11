@@ -114,8 +114,7 @@ def quick_scan(
         id=program_id,
         name=f"Quick Scan: {domain}",
         platform="quick_scan",
-        url=target_url,
-        raw_text="",
+        raw_text=f"Quick scan target: {target_url}",
         is_archived=False,
     )
     db.add(program)
