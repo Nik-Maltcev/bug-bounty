@@ -81,43 +81,68 @@ class RealWebPlugin(ScanPlugin):
         """Запускает все доступные инструменты поэтапно."""
         all_findings: list[RawFinding] = []
         target = asset.target
+        
+        logger.info("Starting scan for target: %s", target)
+        
+        # Log available tools
+        available_tools = []
+        for tool in ["subfinder", "amass", "httpx", "gau", "gobuster", "ffuf", 
+                     "wafw00f", "whatweb", "wpscan", "nmap", "nuclei", "dalfox", "sqlmap", "nikto"]:
+            if self._is_tool_available(tool):
+                available_tools.append(tool)
+        logger.info("Available tools: %s", ", ".join(available_tools) if available_tools else "NONE")
 
         # --- Разведка ---
         if self._is_tool_available("subfinder"):
+            logger.info("Running subfinder...")
             all_findings.extend(self._run_subfinder(target, asset.id))
         if self._is_tool_available("amass"):
+            logger.info("Running amass...")
             all_findings.extend(self._run_amass(target, asset.id))
         if self._is_tool_available("httpx"):
+            logger.info("Running httpx...")
             all_findings.extend(self._run_httpx(target, asset.id))
         if self._is_tool_available("gau"):
+            logger.info("Running gau...")
             all_findings.extend(self._run_gau(target, asset.id))
 
         # --- Перебор ---
         if self._is_tool_available("gobuster"):
+            logger.info("Running gobuster...")
             all_findings.extend(self._run_gobuster(target, asset.id))
         if self._is_tool_available("ffuf"):
+            logger.info("Running ffuf...")
             all_findings.extend(self._run_ffuf(target, asset.id))
 
         # --- WAF / Технологии ---
         if self._is_tool_available("wafw00f"):
+            logger.info("Running wafw00f...")
             all_findings.extend(self._run_wafw00f(target, asset.id))
         if self._is_tool_available("whatweb"):
+            logger.info("Running whatweb...")
             all_findings.extend(self._run_whatweb(target, asset.id))
         if self._is_tool_available("wpscan"):
+            logger.info("Running wpscan...")
             all_findings.extend(self._run_wpscan(target, asset.id))
 
         # --- Уязвимости ---
         if self._is_tool_available("nmap"):
+            logger.info("Running nmap...")
             all_findings.extend(self._run_nmap(target, asset.id))
         if self._is_tool_available("nuclei"):
+            logger.info("Running nuclei...")
             all_findings.extend(self._run_nuclei(target, asset.id))
         if self._is_tool_available("dalfox"):
+            logger.info("Running dalfox...")
             all_findings.extend(self._run_dalfox(target, asset.id))
         if self._is_tool_available("sqlmap"):
+            logger.info("Running sqlmap...")
             all_findings.extend(self._run_sqlmap(target, asset.id))
         if self._is_tool_available("nikto"):
+            logger.info("Running nikto...")
             all_findings.extend(self._run_nikto(target, asset.id))
-
+        
+        logger.info("Scan completed. Total findings: %d", len(all_findings))
         return all_findings
 
     def _is_tool_available(self, tool_name: str) -> bool:
