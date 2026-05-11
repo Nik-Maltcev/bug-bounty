@@ -121,7 +121,7 @@ def quick_scan(
 
     # Создаём актив
     asset_id = str(uuid.uuid4())
-    asset_type = "api" if body.scan_type == "api" else "web"
+    asset_type = "web_application"  # Всегда web_application
     asset_db = AssetDB(
         id=asset_id,
         program_id=program_id,
