@@ -3,7 +3,7 @@
 Содержит класс ReportGenerator для:
 - Генерации структурированных отчётов из уязвимостей
 - Экспорта в Markdown и PDF (text-based)
-- Валидации полноты данных
+- Автоматического обогащения данных из базы знаний
 
 Требования: 6.1, 6.2, 6.3, 6.4
 """
@@ -11,24 +11,17 @@
 import uuid
 from datetime import UTC, datetime
 
-from app.core.exceptions import InsufficientDataError
 from app.models.schemas import ParsedProgram, Report, SeverityLevel, Vulnerability
+from app.services.vulnerability_knowledge import enrich_vulnerability, get_vulnerability_info
 
 
 class ReportGenerator:
     """Генератор отчётов об уязвимостях."""
 
-    # Обязательные поля уязвимости для генерации отчёта
-    REQUIRED_FIELDS = [
-        "description",
-        "steps_to_reproduce",
-        "evidence",
-        "impact_assessment",
-        "remediation",
-    ]
-
     def generate(self, vulnerability: Vulnerability, program: ParsedProgram) -> Report:
         """Генерирует структурированный отчёт.
+
+        Автоматически обогащает данные из базы знаний если поля пустые.
 
         Args:
             vulnerability: данные об уязвимости
@@ -36,23 +29,34 @@ class ReportGenerator:
 
         Returns:
             Report с описанием, шагами воспроизведения, PoC, рекомендациями
-
-        Raises:
-            InsufficientDataError: если данных недостаточно для отчёта
         """
-        missing = self.validate_completeness(vulnerability)
-        if missing:
-            raise InsufficientDataError(missing)
-
         now = datetime.now(UTC)
 
-        title = f"[{vulnerability.severity.value.upper()}] {vulnerability.vulnerability_type}"
+        # Получаем информацию из базы знаний
+        vuln_info = get_vulnerability_info(vulnerability.vulnerability_type)
+        enriched = enrich_vulnerability(
+            vuln_type=vulnerability.vulnerability_type,
+            description=vulnerability.description,
+            evidence=vulnerability.evidence,
+        )
+
+        # Формируем заголовок
+        severity_label = self._get_severity_label(vulnerability.severity)
+        vuln_title = vuln_info.title if vuln_info else vulnerability.vulnerability_type
+        title = f"[{severity_label}] {vuln_title}"
         if program.name:
             title = f"{title} — {program.name}"
 
-        description = vulnerability.description
+        # Используем данные из уязвимости или обогащённые данные
+        description = vulnerability.description or enriched["description"]
+        steps = vulnerability.steps_to_reproduce or enriched["steps_to_reproduce"]
+        impact = vulnerability.impact_assessment or enriched["impact_assessment"]
+        remediation = vulnerability.remediation or enriched["remediation"]
+        evidence = vulnerability.evidence or "Не указано"
+
+        # Добавляем disclosure requirements если есть
         if program.disclosure_requirements:
-            description += f"\n\nDisclosure requirements: {program.disclosure_requirements}"
+            description += f"\n\n**Требования к раскрытию:** {program.disclosure_requirements}"
 
         return Report(
             id=str(uuid.uuid4()),
@@ -60,11 +64,11 @@ class ReportGenerator:
             program_id=program.id,
             title=title,
             description=description,
-            steps_to_reproduce=vulnerability.steps_to_reproduce,
-            proof_of_concept=vulnerability.evidence,
-            impact=vulnerability.impact_assessment,
+            steps_to_reproduce=steps,
+            proof_of_concept=evidence,
+            impact=impact,
             severity=vulnerability.severity,
-            remediation=vulnerability.remediation,
+            remediation=remediation,
             format_version="1.0",
             created_at=now,
             updated_at=now,
@@ -79,30 +83,45 @@ class ReportGenerator:
         Returns:
             Строка в формате Markdown
         """
+        severity_emoji = self._get_severity_emoji(report.severity)
+        severity_label = self._get_severity_label(report.severity)
+        
         lines = [
             f"# {report.title}",
             "",
-            f"**Серьёзность:** {report.severity.value.upper()}",
-            f"**ID отчёта:** {report.id}",
-            f"**Создан:** {report.created_at.isoformat()}",
+            f"**Серьёзность:** {severity_emoji} {severity_label}",
+            f"**ID отчёта:** `{report.id}`",
+            f"**Создан:** {report.created_at.strftime('%Y-%m-%d %H:%M:%S UTC')}",
             "",
-            "## Описание",
+            "---",
+            "",
+            "## 📋 Описание",
             "",
             report.description,
             "",
-            "## Шаги для воспроизведения",
+            "---",
+            "",
+            "## 🔍 Шаги для воспроизведения",
             "",
             report.steps_to_reproduce,
             "",
-            "## Доказательство концепции",
+            "---",
             "",
+            "## 💻 Доказательство концепции (PoC)",
+            "",
+            "```",
             report.proof_of_concept,
+            "```",
             "",
-            "## Влияние",
+            "---",
+            "",
+            "## ⚠️ Оценка влияния",
             "",
             report.impact,
             "",
-            "## Рекомендации по устранению",
+            "---",
+            "",
+            "## ✅ Рекомендации по устранению",
             "",
             report.remediation,
             "",
@@ -120,18 +139,21 @@ class ReportGenerator:
         Returns:
             bytes — текстовое представление отчёта
         """
+        severity_label = self._get_severity_label(report.severity)
+        
         text = (
+            f"{'=' * 60}\n"
             f"ОТЧЁТ ОБ УЯЗВИМОСТИ\n"
-            f"{'=' * 40}\n"
+            f"{'=' * 60}\n\n"
             f"Название: {report.title}\n"
-            f"Серьёзность: {report.severity.value.upper()}\n"
+            f"Серьёзность: {severity_label}\n"
             f"ID отчёта: {report.id}\n"
-            f"Создан: {report.created_at.isoformat()}\n"
-            f"\n"
+            f"Создан: {report.created_at.strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
+            f"\n{'=' * 60}\n\n"
             f"ОПИСАНИЕ\n{'-' * 40}\n{report.description}\n\n"
             f"ШАГИ ДЛЯ ВОСПРОИЗВЕДЕНИЯ\n{'-' * 40}\n{report.steps_to_reproduce}\n\n"
             f"ДОКАЗАТЕЛЬСТВО КОНЦЕПЦИИ\n{'-' * 40}\n{report.proof_of_concept}\n\n"
-            f"ВЛИЯНИЕ\n{'-' * 40}\n{report.impact}\n\n"
+            f"ОЦЕНКА ВЛИЯНИЯ\n{'-' * 40}\n{report.impact}\n\n"
             f"РЕКОМЕНДАЦИИ ПО УСТРАНЕНИЮ\n{'-' * 40}\n{report.remediation}\n"
         )
         return text.encode("utf-8")
@@ -139,15 +161,37 @@ class ReportGenerator:
     def validate_completeness(self, vulnerability: Vulnerability) -> list[str]:
         """Проверяет полноту данных для отчёта.
 
+        Теперь всегда возвращает пустой список, так как данные
+        автоматически обогащаются из базы знаний.
+
         Args:
             vulnerability: уязвимость для проверки
 
         Returns:
-            Список недостающих полей (пустой если всё заполнено)
+            Пустой список (данные всегда достаточны)
         """
-        missing: list[str] = []
-        for field in self.REQUIRED_FIELDS:
-            value = getattr(vulnerability, field, None)
-            if not value or (isinstance(value, str) and not value.strip()):
-                missing.append(field)
-        return missing
+        return []
+
+    @staticmethod
+    def _get_severity_label(severity: SeverityLevel) -> str:
+        """Возвращает русскую метку серьёзности."""
+        labels = {
+            SeverityLevel.CRITICAL: "КРИТИЧЕСКАЯ",
+            SeverityLevel.HIGH: "ВЫСОКАЯ",
+            SeverityLevel.MEDIUM: "СРЕДНЯЯ",
+            SeverityLevel.LOW: "НИЗКАЯ",
+            SeverityLevel.INFORMATIONAL: "ИНФОРМАЦИОННАЯ",
+        }
+        return labels.get(severity, severity.value.upper())
+
+    @staticmethod
+    def _get_severity_emoji(severity: SeverityLevel) -> str:
+        """Возвращает emoji для серьёзности."""
+        emojis = {
+            SeverityLevel.CRITICAL: "🔴",
+            SeverityLevel.HIGH: "🟠",
+            SeverityLevel.MEDIUM: "🟡",
+            SeverityLevel.LOW: "🔵",
+            SeverityLevel.INFORMATIONAL: "⚪",
+        }
+        return emojis.get(severity, "⚪")

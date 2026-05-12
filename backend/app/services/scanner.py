@@ -29,6 +29,7 @@ from app.services.scan_plugins.base import ScanPlugin
 from app.services.scan_plugins.real_web_plugin import RealWebPlugin
 from app.services.scan_orchestrator import ScanOrchestrator
 from app.services.audit_logger import AuditLogger
+from app.services.vulnerability_knowledge import enrich_vulnerability
 from app.core.exceptions import ScanError
 
 logger = logging.getLogger(__name__)
@@ -280,6 +281,8 @@ class Scanner:
     ) -> VulnerabilityRecord:
         """Сохраняет классифицированную находку в БД.
 
+        Обогащает данные информацией из базы знаний по уязвимостям.
+
         Args:
             finding: сырая находка.
             severity: уровень серьёзности.
@@ -290,17 +293,32 @@ class Scanner:
         Returns:
             Созданная запись VulnerabilityRecord.
         """
+        # Обогащаем данные из базы знаний
+        enriched = enrich_vulnerability(
+            vuln_type=finding.vulnerability_type,
+            description=finding.description,
+            evidence=finding.evidence,
+        )
+        
+        # Переопределяем серьёзность если указано в базе знаний
+        final_severity = severity
+        if enriched.get("severity_override"):
+            try:
+                final_severity = SeverityLevel(enriched["severity_override"])
+            except ValueError:
+                pass
+        
         record = VulnerabilityRecord(
             id=str(uuid.uuid4()),
             scan_id=scan_id,
             program_id=program_id,
             vulnerability_type=finding.vulnerability_type,
-            severity=severity.value,
-            description=finding.description,
-            steps_to_reproduce="",
+            severity=final_severity.value,
+            description=enriched["description"],
+            steps_to_reproduce=enriched["steps_to_reproduce"],
             evidence=finding.evidence,
-            impact_assessment="",
-            remediation="",
+            impact_assessment=enriched["impact_assessment"],
+            remediation=enriched["remediation"],
             status="new",
         )
         db.add(record)
