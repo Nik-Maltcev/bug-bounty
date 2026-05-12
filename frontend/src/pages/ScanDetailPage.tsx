@@ -360,32 +360,51 @@ export default function ScanDetailPage() {
 
       {/* AI Analysis Button */}
       {scan.status === 'completed' && vulns.length > 0 && (
-        <div className="bg-gradient-to-r from-purple-900/30 to-blue-900/30 border border-purple-500/30 rounded-xl p-6">
-          <div className="flex items-center justify-between">
+        <div className="flex gap-4">
+          {/* Summary Report Button */}
+          <Link
+            to={`/app/scans/${id}/report`}
+            className="flex-1 bg-gradient-to-r from-green-900/30 to-emerald-900/30 border border-green-500/30 rounded-xl p-6 hover:from-green-900/40 hover:to-emerald-900/40 transition-all"
+          >
             <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-purple-500/20 rounded-xl flex items-center justify-center">
-                <Brain className="w-6 h-6 text-purple-400" />
+              <div className="w-12 h-12 bg-green-500/20 rounded-xl flex items-center justify-center">
+                <FileText className="w-6 h-6 text-green-400" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-white">ИИ-анализ (Stage 2)</h3>
-                <p className="text-slate-400 text-sm">Глубокий анализ с генерацией PoC и рекомендаций</p>
+                <h3 className="text-lg font-bold text-white">Сводный отчёт</h3>
+                <p className="text-slate-400 text-sm">Полный отчёт для печати и экспорта</p>
               </div>
             </div>
-            <button onClick={handleStartAI} disabled={aiLoading}
-              className={clsx(
-                "px-6 py-3 rounded-xl font-medium transition-all flex items-center gap-2",
-                aiLoading ? "bg-slate-700 text-slate-400 cursor-not-allowed" 
-                         : "bg-purple-600 text-white hover:bg-purple-500 shadow-lg shadow-purple-500/25"
-              )}>
-              {aiLoading ? <><Loader2 className="w-5 h-5 animate-spin" />Анализирую...</> 
-                        : <><Brain className="w-5 h-5" />Запустить ИИ-анализ</>}
-            </button>
+          </Link>
+
+          {/* AI Analysis */}
+          <div className="flex-1 bg-gradient-to-r from-purple-900/30 to-blue-900/30 border border-purple-500/30 rounded-xl p-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-purple-500/20 rounded-xl flex items-center justify-center">
+                  <Brain className="w-6 h-6 text-purple-400" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white">ИИ-анализ (Stage 2)</h3>
+                  <p className="text-slate-400 text-sm">Глубокий анализ с генерацией PoC</p>
+                </div>
+              </div>
+              <button onClick={handleStartAI} disabled={aiLoading}
+                className={clsx(
+                  "px-6 py-3 rounded-xl font-medium transition-all flex items-center gap-2",
+                  aiLoading ? "bg-slate-700 text-slate-400 cursor-not-allowed" 
+                           : "bg-purple-600 text-white hover:bg-purple-500 shadow-lg shadow-purple-500/25"
+                )}>
+                {aiLoading ? <><Loader2 className="w-5 h-5 animate-spin" />Анализирую...</> 
+                          : <><Brain className="w-5 h-5" />Запустить</>}
+              </button>
+            </div>
+            {aiStatus && (
+              <p className={clsx("mt-4 text-sm", aiStatus.includes('Ошибка') ? "text-red-400" : "text-green-400")}>
+                {aiStatus}
+              </p>
+            )}
           </div>
-          {aiStatus && (
-            <p className={clsx("mt-4 text-sm", aiStatus.includes('Ошибка') ? "text-red-400" : "text-green-400")}>
-              {aiStatus}
-            </p>
-          )}
         </div>
       )}
 

@@ -9,6 +9,7 @@ import ProgramsPage from './pages/ProgramsPage';
 import ProgramDetailPage from './pages/ProgramDetailPage';
 import ScansPage from './pages/ScansPage';
 import ScanDetailPage from './pages/ScanDetailPage';
+import ScanReportPage from './pages/ScanReportPage';
 import VulnerabilitiesPage from './pages/VulnerabilitiesPage';
 import VulnerabilityDetailPage from './pages/VulnerabilityDetailPage';
 import ReportsPage from './pages/ReportsPage';
@@ -53,6 +54,7 @@ export default function App() {
           <Route path="programs/:id/chat" element={<ChatPage />} />
           <Route path="scans" element={<ScansPage />} />
           <Route path="scans/:id" element={<ScanDetailPage />} />
+          <Route path="scans/:id/report" element={<ScanReportPage />} />
           <Route path="vulnerabilities" element={<VulnerabilitiesPage />} />
           <Route path="vulnerabilities/:id" element={<VulnerabilityDetailPage />} />
           <Route path="reports" element={<ReportsPage />} />

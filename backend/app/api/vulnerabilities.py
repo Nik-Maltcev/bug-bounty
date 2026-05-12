@@ -315,3 +315,84 @@ def export_report(
             media_type="application/pdf",
             headers={"Content-Disposition": f"attachment; filename=report-{report_id}.pdf"},
         )
+
+
+@router.get("/api/scans/{scan_id}/summary-report")
+def get_scan_summary_report(
+    scan_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Сводный отчёт по сканированию с группировкой по критичности."""
+    from app.models.database import Scan
+    from app.services.vulnerability_knowledge import get_vulnerability_info
+    
+    scan = db.query(Scan).filter(Scan.id == scan_id).first()
+    if scan is None:
+        raise HTTPException(status_code=404, detail="Сканирование не найдено")
+    
+    # Получаем актив
+    asset = db.query(AssetDB).filter(AssetDB.id == scan.asset_id).first()
+    target_url = asset.target if asset else "Неизвестно"
+    target_name = asset.name if asset else "Неизвестно"
+    
+    # Получаем все уязвимости
+    vulns = db.query(VulnerabilityRecord).filter(VulnerabilityRecord.scan_id == scan_id).all()
+    
+    # Группируем по серьёзности
+    severity_order = ['critical', 'high', 'medium', 'low', 'informational']
+    severity_labels = {
+        'critical': 'Критические',
+        'high': 'Высокие', 
+        'medium': 'Средние',
+        'low': 'Низкие',
+        'informational': 'Информационные'
+    }
+    
+    grouped = {s: [] for s in severity_order}
+    for v in vulns:
+        sev = v.severity if v.severity in severity_order else 'informational'
+        
+        # Получаем информацию из базы знаний
+        info = get_vulnerability_info(v.vulnerability_type)
+        title = info.title if info else v.vulnerability_type
+        
+        grouped[sev].append({
+            'id': v.id,
+            'type': v.vulnerability_type,
+            'title': title,
+            'description': v.description,
+            'evidence': v.evidence,
+            'steps_to_reproduce': v.steps_to_reproduce,
+            'impact': v.impact_assessment,
+            'remediation': v.remediation,
+        })
+    
+    # Статистика
+    stats = {
+        'total': len(vulns),
+        'critical': len(grouped['critical']),
+        'high': len(grouped['high']),
+        'medium': len(grouped['medium']),
+        'low': len(grouped['low']),
+        'informational': len(grouped['informational']),
+    }
+    
+    return {
+        'scan_id': scan_id,
+        'target_url': target_url,
+        'target_name': target_name,
+        'scan_date': scan.started_at.isoformat() if scan.started_at else None,
+        'completed_at': scan.completed_at.isoformat() if scan.completed_at else None,
+        'status': scan.status,
+        'stats': stats,
+        'vulnerabilities': {
+            severity: {
+                'label': severity_labels[severity],
+                'count': len(items),
+                'items': items
+            }
+            for severity, items in grouped.items()
+            if items  # Только непустые группы
+        }
+    }

@@ -149,6 +149,46 @@ export async function startAIScan(scanId: string): Promise<{ status: string; mes
   return res.data;
 }
 
+export interface SummaryReportVuln {
+  id: string;
+  type: string;
+  title: string;
+  description: string;
+  evidence: string;
+  steps_to_reproduce: string;
+  impact: string;
+  remediation: string;
+}
+
+export interface SummaryReportGroup {
+  label: string;
+  count: number;
+  items: SummaryReportVuln[];
+}
+
+export interface ScanSummaryReport {
+  scan_id: string;
+  target_url: string;
+  target_name: string;
+  scan_date: string | null;
+  completed_at: string | null;
+  status: string;
+  stats: {
+    total: number;
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+    informational: number;
+  };
+  vulnerabilities: Record<string, SummaryReportGroup>;
+}
+
+export async function getScanSummaryReport(scanId: string): Promise<ScanSummaryReport> {
+  const res = await api.get<ScanSummaryReport>(`/api/scans/${scanId}/summary-report`);
+  return res.data;
+}
+
 // --- Vulnerabilities API ---
 
 export async function listVulnerabilities(filters?: {
