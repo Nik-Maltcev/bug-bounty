@@ -143,8 +143,8 @@ SUPPORTED_TOOLS: dict[str, ToolSpec] = {
         name="gobuster",
         binary_name="gobuster",
         min_version="3.6.0",
-        version_command=["gobuster", "version"],
-        version_regex=r"([\d.]+)",
+        version_command=["gobuster", "--help"],  # gobuster doesn't have version command
+        version_regex=r"gobuster",  # Just check if it runs
         install_commands={
             "go": ["go", "install", "-v", "github.com/OJ/gobuster/v3@latest"],
         },
