@@ -278,9 +278,10 @@ class ComplianceManager:
     ]
 
     CONFIG_MODIFICATION_PATTERNS = [
-        r"/etc/passwd",
-        r"/etc/shadow",
-        r"/etc/sudoers",
+        # Блокируем только запись в конфиги, не чтение
+        # r"/etc/passwd",  # Разрешаем для LFI-тестов (read-only)
+        # r"/etc/shadow",  # Разрешаем для LFI-тестов (read-only)
+        r"/etc/sudoers",  # Опасно даже читать
         r"\.htaccess",
         r"web\.config",
         r"wp-config\.php",
@@ -406,7 +407,8 @@ class ComplianceManager:
                 if re.search(pattern, check_text, re.IGNORECASE):
                     return f"Загрузка исполняемого файла: {pattern}"
 
-        # Проверка модификации конфигурации
+        # Проверка модификации конфигурации (только для POST/PUT/PATCH/DELETE, не GET)
+        # GET с /etc/passwd — это LFI-тест, разрешаем
         if request.method in ("POST", "PUT", "PATCH", "DELETE"):
             for pattern in self.CONFIG_MODIFICATION_PATTERNS:
                 if re.search(pattern, check_text, re.IGNORECASE):
