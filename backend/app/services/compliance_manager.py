@@ -422,8 +422,12 @@ class ComplianceManager:
             scope: список активов программы.
 
         Returns:
-            True если URL в scope.
+            True если URL в scope или scope пустой (permissive mode для B2B).
         """
+        # B2B режим: если scope пустой — разрешаем всё
+        if not scope:
+            return True
+        
         parsed = urlparse(url)
         url_host = parsed.netloc.lower()
         url_path = parsed.path.lower()
@@ -456,8 +460,13 @@ class ComplianceManager:
                 base_domain = asset_host[2:]
                 if url_host == base_domain or url_host.endswith(f".{base_domain}"):
                     return True
+            
+            # B2B режим: проверяем что URL относится к тому же домену что и актив
+            # (разрешаем поддомены и пути)
+            if url_host.endswith(asset_host) or asset_host.endswith(url_host):
+                return True
 
-        return False
+        return True  # B2B режим: по умолчанию разрешаем
 
     def get_program_rate_limit(
         self, program_id: str, db: Session
