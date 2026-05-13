@@ -208,7 +208,10 @@ class Scanner:
         scan_record.percent_complete = 70
         db.commit()
 
-        for finding in raw_findings:
+        # Дедупликация: группируем по типу уязвимости
+        deduplicated = self._deduplicate_findings(raw_findings)
+        
+        for finding in deduplicated:
             severity = self.classify_severity(finding)
             self._save_finding(finding, severity, scan_id, scan_config.program_id, db)
 
@@ -216,7 +219,7 @@ class Scanner:
         progress.status = ScanStatus.COMPLETED
         progress.current_stage = "completed"
         progress.percent_complete = 100
-        progress.findings_count = len(raw_findings)
+        progress.findings_count = len(deduplicated)
         self._sessions[scan_id] = progress
 
         scan_record.status = ScanStatus.COMPLETED.value
@@ -237,6 +240,109 @@ class Scanner:
             ScanProgress или None, если сканирование не найдено.
         """
         return self._sessions.get(scan_id)
+
+    @staticmethod
+    def _deduplicate_findings(findings: list[RawFinding]) -> list[RawFinding]:
+        """Дедупликация находок: группирует одинаковые уязвимости.
+        
+        Группирует по типу уязвимости и объединяет evidence.
+        Для информационных находок (поддомены, URL, порты) — агрегирует в одну запись.
+        
+        Args:
+            findings: список сырых находок.
+            
+        Returns:
+            Дедуплицированный список находок.
+        """
+        # Типы для агрегации (много однотипных записей)
+        AGGREGATE_TYPES = {
+            "subdomain_discovery", "historical_url", "open_port", 
+            "host_probe", "hidden_directory", "endpoint_discovery",
+        }
+        
+        # Типы для простой дедупликации (по template-id)
+        DEDUP_BY_TYPE = {
+            "nuclei_", "nikto_", "zap_", "wpscan_", "slither_", "mythril_",
+        }
+        
+        aggregated: dict[str, RawFinding] = {}
+        deduplicated: dict[str, RawFinding] = {}
+        unique: list[RawFinding] = []
+        
+        for finding in findings:
+            vuln_type = finding.vulnerability_type
+            
+            # Агрегация информационных находок
+            if vuln_type in AGGREGATE_TYPES:
+                if vuln_type not in aggregated:
+                    # Первая находка — создаём агрегированную запись
+                    aggregated[vuln_type] = RawFinding(
+                        vulnerability_type=vuln_type,
+                        description=finding.description,
+                        evidence=finding.evidence,
+                        affected_asset_id=finding.affected_asset_id,
+                        raw_data={
+                            **finding.raw_data,
+                            "_aggregated_count": 1,
+                            "_aggregated_items": [finding.evidence],
+                        },
+                    )
+                else:
+                    # Добавляем к существующей
+                    agg = aggregated[vuln_type]
+                    count = agg.raw_data.get("_aggregated_count", 1) + 1
+                    items = agg.raw_data.get("_aggregated_items", [])
+                    
+                    # Ограничиваем список до 20 элементов
+                    if len(items) < 20:
+                        items.append(finding.evidence)
+                    
+                    agg.raw_data["_aggregated_count"] = count
+                    agg.raw_data["_aggregated_items"] = items
+                    
+                    # Обновляем описание с количеством
+                    type_labels = {
+                        "subdomain_discovery": "поддоменов",
+                        "historical_url": "исторических URL",
+                        "open_port": "открытых портов",
+                        "host_probe": "живых хостов",
+                        "hidden_directory": "скрытых директорий",
+                        "endpoint_discovery": "эндпоинтов",
+                    }
+                    label = type_labels.get(vuln_type, "находок")
+                    agg.description = f"Обнаружено {count} {label}"
+                    agg.evidence = "\n".join(items[:10])
+                    if count > 10:
+                        agg.evidence += f"\n... и ещё {count - 10}"
+                continue
+            
+            # Дедупликация по типу (nuclei templates и т.д.)
+            is_dedup_type = any(vuln_type.startswith(prefix) for prefix in DEDUP_BY_TYPE)
+            if is_dedup_type:
+                # Ключ: тип уязвимости (без учёта конкретного URL)
+                dedup_key = vuln_type
+                if dedup_key not in deduplicated:
+                    deduplicated[dedup_key] = finding
+                else:
+                    # Уже есть такая — добавляем URL в evidence
+                    existing = deduplicated[dedup_key]
+                    count = existing.raw_data.get("_dedup_count", 1) + 1
+                    existing.raw_data["_dedup_count"] = count
+                    
+                    # Добавляем URL если отличается
+                    if finding.evidence not in existing.evidence:
+                        if count <= 5:
+                            existing.evidence += f"\n{finding.evidence}"
+                        elif count == 6:
+                            existing.evidence += f"\n... и ещё несколько"
+                continue
+            
+            # Остальные — без дедупликации
+            unique.append(finding)
+        
+        # Собираем результат
+        result = list(aggregated.values()) + list(deduplicated.values()) + unique
+        return result
 
     @staticmethod
     def classify_severity(finding: RawFinding) -> SeverityLevel:
