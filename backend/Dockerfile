@@ -48,43 +48,58 @@ RUN GAU_VERSION=$(curl -sSL https://api.github.com/repos/lc/gau/releases/latest 
     && find /tmp/gau -name "gau" -type f -exec mv {} /usr/local/bin/gau \; \
     && chmod +x /usr/local/bin/gau && rm -rf /tmp/gau /tmp/gau.tar.gz
 
-# dalfox - XSS scanner
+# dalfox - XSS scanner (uses zip format)
 RUN DALFOX_VERSION=$(curl -sSL https://api.github.com/repos/hahwul/dalfox/releases/latest | grep tag_name | cut -d'"' -f4 | tr -d v) \
     && curl -sSL "https://github.com/hahwul/dalfox/releases/download/v${DALFOX_VERSION}/dalfox_${DALFOX_VERSION}_linux_amd64.tar.gz" -o /tmp/dalfox.tar.gz \
-    && tar -xzf /tmp/dalfox.tar.gz -C /usr/local/bin/ dalfox && rm /tmp/dalfox.tar.gz
+    && mkdir -p /tmp/dalfox && tar -xzf /tmp/dalfox.tar.gz -C /tmp/dalfox \
+    && find /tmp/dalfox -name "dalfox" -type f -exec cp {} /usr/local/bin/dalfox \; \
+    && chmod +x /usr/local/bin/dalfox && rm -rf /tmp/dalfox /tmp/dalfox.tar.gz \
+    || echo "dalfox installation skipped"
 
 # === NEW TOOLS FOR DEEP SCANNING ===
 
 # trufflehog - secret scanner for git repos
 RUN TRUFFLEHOG_VERSION=$(curl -sSL https://api.github.com/repos/trufflesecurity/trufflehog/releases/latest | grep tag_name | cut -d'"' -f4 | tr -d v) \
     && curl -sSL "https://github.com/trufflesecurity/trufflehog/releases/download/v${TRUFFLEHOG_VERSION}/trufflehog_${TRUFFLEHOG_VERSION}_linux_amd64.tar.gz" -o /tmp/trufflehog.tar.gz \
-    && tar -xzf /tmp/trufflehog.tar.gz -C /usr/local/bin/ trufflehog && rm /tmp/trufflehog.tar.gz
+    && mkdir -p /tmp/trufflehog && tar -xzf /tmp/trufflehog.tar.gz -C /tmp/trufflehog \
+    && find /tmp/trufflehog -name "trufflehog" -type f -exec cp {} /usr/local/bin/trufflehog \; \
+    && chmod +x /usr/local/bin/trufflehog && rm -rf /tmp/trufflehog /tmp/trufflehog.tar.gz \
+    || echo "trufflehog installation skipped"
 
 # gitleaks - secret scanner
 RUN GITLEAKS_VERSION=$(curl -sSL https://api.github.com/repos/gitleaks/gitleaks/releases/latest | grep tag_name | cut -d'"' -f4 | tr -d v) \
     && curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -o /tmp/gitleaks.tar.gz \
-    && tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin/ gitleaks && rm /tmp/gitleaks.tar.gz
+    && mkdir -p /tmp/gitleaks && tar -xzf /tmp/gitleaks.tar.gz -C /tmp/gitleaks \
+    && find /tmp/gitleaks -name "gitleaks" -type f -exec cp {} /usr/local/bin/gitleaks \; \
+    && chmod +x /usr/local/bin/gitleaks && rm -rf /tmp/gitleaks /tmp/gitleaks.tar.gz \
+    || echo "gitleaks installation skipped"
 
 # assetfinder - subdomain discovery
 RUN curl -sSL "https://github.com/tomnomnom/assetfinder/releases/download/v0.1.1/assetfinder-linux-amd64-0.1.1.tgz" -o /tmp/assetfinder.tgz \
-    && tar -xzf /tmp/assetfinder.tgz -C /usr/local/bin/ && rm /tmp/assetfinder.tgz
+    && tar -xzf /tmp/assetfinder.tgz -C /usr/local/bin/ && rm /tmp/assetfinder.tgz \
+    || echo "assetfinder installation skipped"
 
 # katana - web crawler
 RUN KATANA_VERSION=$(curl -sSL https://api.github.com/repos/projectdiscovery/katana/releases/latest | grep tag_name | cut -d'"' -f4 | tr -d v) \
     && curl -sSL "https://github.com/projectdiscovery/katana/releases/download/v${KATANA_VERSION}/katana_${KATANA_VERSION}_linux_amd64.zip" -o /tmp/katana.zip \
-    && unzip -o /tmp/katana.zip -d /usr/local/bin/ && rm /tmp/katana.zip
+    && unzip -o /tmp/katana.zip -d /usr/local/bin/ && rm /tmp/katana.zip \
+    || echo "katana installation skipped"
 
 # dnsx - DNS toolkit
 RUN DNSX_VERSION=$(curl -sSL https://api.github.com/repos/projectdiscovery/dnsx/releases/latest | grep tag_name | cut -d'"' -f4 | tr -d v) \
     && curl -sSL "https://github.com/projectdiscovery/dnsx/releases/download/v${DNSX_VERSION}/dnsx_${DNSX_VERSION}_linux_amd64.zip" -o /tmp/dnsx.zip \
-    && unzip -o /tmp/dnsx.zip -d /usr/local/bin/ && rm /tmp/dnsx.zip
+    && unzip -o /tmp/dnsx.zip -d /usr/local/bin/ && rm /tmp/dnsx.zip \
+    || echo "dnsx installation skipped"
 
 # testssl.sh - SSL/TLS scanner
 RUN git clone --depth 1 https://github.com/drwetter/testssl.sh.git /opt/testssl \
-    && ln -s /opt/testssl/testssl.sh /usr/local/bin/testssl
+    && ln -s /opt/testssl/testssl.sh /usr/local/bin/testssl \
+    || echo "testssl installation skipped"
 
-# Python security tools
-RUN pip install --no-cache-dir sqlmap wafw00f arjun corsy paramspider 2>/dev/null || true
+# Python security tools (some may fail, that's ok)
+RUN pip install --no-cache-dir sqlmap wafw00f 2>/dev/null || true
+RUN pip install --no-cache-dir arjun 2>/dev/null || echo "arjun skipped"
+RUN pip install --no-cache-dir paramspider 2>/dev/null || echo "paramspider skipped"
 
 # Ruby security tools (whatweb, wpscan) - optional, may fail
 RUN gem install whatweb --no-document 2>/dev/null || echo "whatweb skipped"
