@@ -507,26 +507,37 @@ def start_ai_analysis(
     if not vulns:
         raise HTTPException(status_code=400, detail="Нет уязвимостей для анализа")
     
-    # Проверяем API ключ
-    api_key = os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("LLM_API_KEY")
+    # Проверяем API ключ (приоритет: Anthropic > DeepSeek)
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
+    deepseek_key = os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("LLM_API_KEY")
     
     # Также проверяем сохранённую конфигурацию в БД
     llm_manager = LLMProviderManager(db_session=db)
     saved_config = llm_manager.load_provider_config()
     
-    if not api_key and (not saved_config or not saved_config.api_key):
+    if not anthropic_key and not deepseek_key and (not saved_config or not saved_config.api_key):
         raise HTTPException(
             status_code=400, 
-            detail="API-ключ LLM не настроен. Установите переменную окружения DEEPSEEK_API_KEY или настройте провайдер через /api/ai/config"
+            detail="API-ключ LLM не настроен. Установите ANTHROPIC_API_KEY или DEEPSEEK_API_KEY"
         )
     
-    # Создаём конфигурацию LLM
+    # Создаём конфигурацию LLM (приоритет: сохранённая > Anthropic > DeepSeek)
     if saved_config and saved_config.api_key:
         llm_config = saved_config
+    elif anthropic_key:
+        # Используем Claude Opus 4.6 по умолчанию
+        llm_config = LLMConfig(
+            provider=ProviderType.ANTHROPIC,
+            api_key=anthropic_key,
+            base_url="https://api.anthropic.com",
+            model="claude-opus-4-6",
+            temperature=0.3,
+            max_tokens=8192,
+        )
     else:
         llm_config = LLMConfig(
             provider=ProviderType.DEEPSEEK,
-            api_key=api_key,
+            api_key=deepseek_key,
             base_url="https://api.deepseek.com",
             model="deepseek-chat",
             temperature=0.3,

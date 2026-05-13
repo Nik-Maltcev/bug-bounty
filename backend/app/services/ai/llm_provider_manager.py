@@ -1,7 +1,7 @@
 """LLMProviderManager — менеджер LLM-провайдеров.
 
 Единый интерфейс для взаимодействия со всеми LLM-провайдерами.
-Использует OpenAI SDK как базовый клиент для DeepSeek, OpenAI и Ollama.
+Поддерживает: DeepSeek, OpenAI, Anthropic (Claude), Ollama.
 """
 
 import base64
@@ -28,6 +28,20 @@ DEFAULT_CONFIGS: dict[str, LLMConfig] = {
         model="deepseek-v4-pro",
         temperature=0.2,
     ),
+    "claude-opus": LLMConfig(
+        provider=ProviderType.ANTHROPIC,
+        base_url="https://api.anthropic.com",
+        model="claude-opus-4-6",
+        temperature=0.3,
+        max_tokens=8192,
+    ),
+    "claude-sonnet": LLMConfig(
+        provider=ProviderType.ANTHROPIC,
+        base_url="https://api.anthropic.com",
+        model="claude-sonnet-4-6",
+        temperature=0.3,
+        max_tokens=8192,
+    ),
 }
 
 
@@ -47,6 +61,7 @@ class LLMProviderManager:
     def __init__(self, db_session=None):
         self._db = db_session
         self._clients: dict[str, OpenAI] = {}
+        self._anthropic_clients: dict[str, "anthropic.Anthropic"] = {}
 
     def get_client(self, config: LLMConfig) -> OpenAI:
         """Возвращает OpenAI-совместимый клиент для провайдера."""
@@ -58,6 +73,17 @@ class LLMProviderManager:
             )
         return self._clients[cache_key]
 
+    def get_anthropic_client(self, config: LLMConfig):
+        """Возвращает Anthropic клиент для Claude."""
+        import anthropic
+        
+        cache_key = f"anthropic:{config.model}"
+        if cache_key not in self._anthropic_clients:
+            self._anthropic_clients[cache_key] = anthropic.Anthropic(
+                api_key=config.api_key,
+            )
+        return self._anthropic_clients[cache_key]
+
     def complete(
         self,
         messages: list[dict[str, str]],
@@ -65,7 +91,7 @@ class LLMProviderManager:
     ) -> LLMResponse:
         """Отправляет запрос к LLM и возвращает ответ.
 
-        По умолчанию использует DeepSeek V4-Flash.
+        По умолчанию использует сохранённую конфигурацию или DeepSeek.
         Raises: LLMProviderError при ошибке.
         """
         if config is None:
@@ -73,6 +99,18 @@ class LLMProviderManager:
             saved = self.load_provider_config()
             config = saved if saved else DEFAULT_CONFIGS["deepseek-flash"]
 
+        # Используем разные клиенты в зависимости от провайдера
+        if config.provider == ProviderType.ANTHROPIC:
+            return self._complete_anthropic(messages, config)
+        else:
+            return self._complete_openai(messages, config)
+
+    def _complete_openai(
+        self,
+        messages: list[dict[str, str]],
+        config: LLMConfig,
+    ) -> LLMResponse:
+        """Отправляет запрос через OpenAI-совместимый API."""
         client = self.get_client(config)
 
         try:
@@ -98,6 +136,77 @@ class LLMProviderManager:
                 usage=usage,
                 provider=config.provider,
             )
+        except Exception as e:
+            error_str = str(e)
+            if "rate_limit" in error_str.lower() or "429" in error_str:
+                raise LLMRateLimitError(provider=config.provider.value)
+            raise LLMProviderError(
+                provider=config.provider.value,
+                reason=error_str,
+            )
+
+    def _complete_anthropic(
+        self,
+        messages: list[dict[str, str]],
+        config: LLMConfig,
+    ) -> LLMResponse:
+        """Отправляет запрос через Anthropic API (Claude)."""
+        try:
+            client = self.get_anthropic_client(config)
+            
+            # Anthropic использует другой формат: system отдельно от messages
+            system_prompt = None
+            anthropic_messages = []
+            
+            for msg in messages:
+                if msg["role"] == "system":
+                    system_prompt = msg["content"]
+                else:
+                    anthropic_messages.append({
+                        "role": msg["role"],
+                        "content": msg["content"],
+                    })
+            
+            # Если нет user messages, добавляем пустой
+            if not anthropic_messages:
+                anthropic_messages = [{"role": "user", "content": "ping"}]
+            
+            kwargs = {
+                "model": config.model,
+                "max_tokens": config.max_tokens,
+                "messages": anthropic_messages,
+            }
+            
+            if system_prompt:
+                kwargs["system"] = system_prompt
+            
+            if config.temperature is not None:
+                kwargs["temperature"] = config.temperature
+            
+            response = client.messages.create(**kwargs)
+            
+            # Извлекаем текст из ответа
+            content = ""
+            if response.content:
+                for block in response.content:
+                    if hasattr(block, "text"):
+                        content += block.text
+            
+            usage = {}
+            if response.usage:
+                usage = {
+                    "prompt_tokens": response.usage.input_tokens,
+                    "completion_tokens": response.usage.output_tokens,
+                    "total_tokens": response.usage.input_tokens + response.usage.output_tokens,
+                }
+            
+            return LLMResponse(
+                content=content,
+                model=response.model,
+                usage=usage,
+                provider=config.provider,
+            )
+            
         except Exception as e:
             error_str = str(e)
             if "rate_limit" in error_str.lower() or "429" in error_str:

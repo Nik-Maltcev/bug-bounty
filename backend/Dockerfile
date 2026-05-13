@@ -119,7 +119,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# DeepSeek API key for AI analysis (Stage 2)
+# LLM API keys for AI analysis (Stage 2)
+# Claude Opus 4.6 (Anthropic) - primary
+ENV ANTHROPIC_API_KEY=
+# DeepSeek - fallback
 ENV DEEPSEEK_API_KEY=sk-305c670c93784a95882d8b25cd72491e
 
 # Create default user on first run
