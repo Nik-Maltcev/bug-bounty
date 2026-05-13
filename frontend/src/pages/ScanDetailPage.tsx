@@ -151,6 +151,25 @@ export default function ScanDetailPage() {
     }
   }, [id]);
 
+  // Polling for scan status (Stage 1)
+  const pollScanStatus = useCallback(async () => {
+    if (!id) return;
+    try {
+      const scanData = await getScan(id);
+      setScan(scanData);
+      
+      // If scan completed, refresh vulnerabilities
+      if (scanData.status === 'completed' || scanData.status === 'failed') {
+        const newVulns = await getScanVulnerabilities(id).catch(() => []);
+        setVulns(newVulns);
+      }
+      
+      return scanData;
+    } catch {
+      return null;
+    }
+  }, [id]);
+
   useEffect(() => {
     if (!id) return;
     
@@ -166,6 +185,20 @@ export default function ScanDetailPage() {
       setLoading(false);
     });
   }, [id, pollAIStatus]);
+
+  // Poll scan status while running (Stage 1)
+  useEffect(() => {
+    if (!scan || (scan.status !== 'running' && scan.status !== 'pending')) return;
+    
+    const interval = setInterval(async () => {
+      const scanData = await pollScanStatus();
+      if (scanData && (scanData.status === 'completed' || scanData.status === 'failed')) {
+        clearInterval(interval);
+      }
+    }, 2000);
+    
+    return () => clearInterval(interval);
+  }, [scan?.status, pollScanStatus]);
 
   // Poll AI status while running
   useEffect(() => {

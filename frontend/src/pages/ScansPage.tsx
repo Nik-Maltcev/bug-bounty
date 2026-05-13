@@ -31,6 +31,18 @@ export default function ScansPage() {
     loadScans();
   }, []);
 
+  // Auto-refresh scan list when there are running scans
+  useEffect(() => {
+    const hasRunningScans = scans.some(s => s.status === 'running' || s.status === 'pending');
+    if (!hasRunningScans && !currentScan) return;
+
+    const interval = setInterval(() => {
+      loadScans();
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [scans, currentScan]);
+
   const loadScans = async () => {
     try {
       const data = await listScans(20);
