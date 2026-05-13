@@ -33,6 +33,16 @@ _TOOL_PARSERS: dict[str, str] = {
     "slither": "parse_slither_json",
     "mythril": "parse_mythril_json",
     "zap": "parse_zap_json",
+    # New tools
+    "assetfinder": "parse_assetfinder_text",
+    "katana": "parse_katana_json",
+    "dnsx": "parse_dnsx_json",
+    "testssl": "parse_testssl_json",
+    "arjun": "parse_arjun_json",
+    "paramspider": "parse_paramspider_text",
+    "trufflehog": "parse_trufflehog_json",
+    "gitleaks": "parse_gitleaks_json",
+    "corsy": "parse_corsy_json",
 }
 
 
@@ -633,4 +643,271 @@ class OutputParser:
                 raw_data={"tool": "whatweb", **item},
             ))
 
+        return findings
+
+
+    # ==================================================================
+    # NEW DEEP SCANNING TOOLS PARSERS
+    # ==================================================================
+
+    # ------------------------------------------------------------------
+    # assetfinder — text (subdomains)
+    # ------------------------------------------------------------------
+
+    def parse_assetfinder_text(self, text_output: str, asset_id: str) -> list[RawFinding]:
+        findings: list[RawFinding] = []
+        subdomains: set[str] = set()
+        for line in text_output.strip().splitlines():
+            subdomain = line.strip()
+            if subdomain and subdomain not in subdomains:
+                subdomains.add(subdomain)
+                findings.append(RawFinding(
+                    vulnerability_type="subdomain_discovery",
+                    description=f"Обнаружен поддомен: {subdomain}",
+                    evidence=f"Источник: assetfinder",
+                    affected_asset_id=asset_id,
+                    raw_data={"tool": "assetfinder", "subdomain": subdomain},
+                ))
+        return findings
+
+    # ------------------------------------------------------------------
+    # katana — JSONL (crawled URLs)
+    # ------------------------------------------------------------------
+
+    def parse_katana_json(self, json_output: str, asset_id: str) -> list[RawFinding]:
+        findings: list[RawFinding] = []
+        urls: set[str] = set()
+        for line in json_output.strip().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            url = item.get("request", {}).get("endpoint", "") or item.get("url", "")
+            if url and url not in urls:
+                urls.add(url)
+                findings.append(RawFinding(
+                    vulnerability_type="crawled_url",
+                    description=f"Обнаружен URL при краулинге: {url}",
+                    evidence=f"Метод: {item.get('request', {}).get('method', 'GET')}",
+                    affected_asset_id=asset_id,
+                    raw_data={"tool": "katana", **item},
+                ))
+        return findings
+
+    # ------------------------------------------------------------------
+    # dnsx — JSONL (DNS records)
+    # ------------------------------------------------------------------
+
+    def parse_dnsx_json(self, json_output: str, asset_id: str) -> list[RawFinding]:
+        findings: list[RawFinding] = []
+        for line in json_output.strip().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            host = item.get("host", "")
+            a_records = item.get("a", [])
+            aaaa_records = item.get("aaaa", [])
+            cname_records = item.get("cname", [])
+            mx_records = item.get("mx", [])
+            txt_records = item.get("txt", [])
+            
+            records_info = []
+            if a_records:
+                records_info.append(f"A: {', '.join(a_records)}")
+            if aaaa_records:
+                records_info.append(f"AAAA: {', '.join(aaaa_records)}")
+            if cname_records:
+                records_info.append(f"CNAME: {', '.join(cname_records)}")
+            if mx_records:
+                records_info.append(f"MX: {', '.join(mx_records)}")
+            if txt_records:
+                records_info.append(f"TXT: {', '.join(txt_records[:3])}")
+            
+            if records_info:
+                findings.append(RawFinding(
+                    vulnerability_type="dns_records",
+                    description=f"DNS записи для {host}",
+                    evidence="; ".join(records_info),
+                    affected_asset_id=asset_id,
+                    raw_data={"tool": "dnsx", **item},
+                ))
+        return findings
+
+    # ------------------------------------------------------------------
+    # testssl — JSON (SSL/TLS issues)
+    # ------------------------------------------------------------------
+
+    def parse_testssl_json(self, json_output: str, asset_id: str) -> list[RawFinding]:
+        findings: list[RawFinding] = []
+        try:
+            data = json.loads(json_output)
+        except json.JSONDecodeError:
+            return findings
+
+        # testssl output is usually a list of findings
+        items = data if isinstance(data, list) else data.get("scanResult", [])
+        
+        for item in items:
+            severity = item.get("severity", "INFO")
+            finding_id = item.get("id", "unknown")
+            finding_text = item.get("finding", "")
+            
+            # Skip informational items
+            if severity.upper() in ["OK", "INFO"] and "vulnerable" not in finding_text.lower():
+                continue
+            
+            vuln_type = "ssl_tls_issue"
+            if "certificate" in finding_id.lower():
+                vuln_type = "ssl_certificate_issue"
+            elif "cipher" in finding_id.lower():
+                vuln_type = "weak_cipher"
+            elif "protocol" in finding_id.lower():
+                vuln_type = "insecure_protocol"
+            
+            findings.append(RawFinding(
+                vulnerability_type=vuln_type,
+                description=f"[{severity}] {finding_id}: {finding_text}",
+                evidence=f"ID: {finding_id}",
+                affected_asset_id=asset_id,
+                raw_data={"tool": "testssl", **item},
+            ))
+        return findings
+
+    # ------------------------------------------------------------------
+    # arjun — JSON (hidden parameters)
+    # ------------------------------------------------------------------
+
+    def parse_arjun_json(self, json_output: str, asset_id: str) -> list[RawFinding]:
+        findings: list[RawFinding] = []
+        try:
+            data = json.loads(json_output)
+        except json.JSONDecodeError:
+            return findings
+
+        # arjun output: {"url": {"params": ["param1", "param2"]}}
+        if isinstance(data, dict):
+            for url, params_data in data.items():
+                params = params_data.get("params", []) if isinstance(params_data, dict) else params_data
+                if params:
+                    findings.append(RawFinding(
+                        vulnerability_type="hidden_parameter",
+                        description=f"Обнаружены скрытые параметры на {url}",
+                        evidence=f"Параметры: {', '.join(params)}",
+                        affected_asset_id=asset_id,
+                        raw_data={"tool": "arjun", "url": url, "params": params},
+                    ))
+        return findings
+
+    # ------------------------------------------------------------------
+    # paramspider — text (URLs with parameters)
+    # ------------------------------------------------------------------
+
+    def parse_paramspider_text(self, text_output: str, asset_id: str) -> list[RawFinding]:
+        findings: list[RawFinding] = []
+        urls: set[str] = set()
+        for line in text_output.strip().splitlines():
+            url = line.strip()
+            if url and "?" in url and url not in urls:
+                urls.add(url)
+                # Extract parameters
+                params_part = url.split("?")[1] if "?" in url else ""
+                params = [p.split("=")[0] for p in params_part.split("&") if "=" in p]
+                findings.append(RawFinding(
+                    vulnerability_type="parameterized_url",
+                    description=f"URL с параметрами: {url[:100]}...",
+                    evidence=f"Параметры: {', '.join(params)}",
+                    affected_asset_id=asset_id,
+                    raw_data={"tool": "paramspider", "url": url, "params": params},
+                ))
+        return findings
+
+    # ------------------------------------------------------------------
+    # trufflehog — JSONL (secrets)
+    # ------------------------------------------------------------------
+
+    def parse_trufflehog_json(self, json_output: str, asset_id: str) -> list[RawFinding]:
+        findings: list[RawFinding] = []
+        for line in json_output.strip().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            
+            detector_name = item.get("DetectorName", item.get("detectorName", "unknown"))
+            raw_value = item.get("Raw", item.get("raw", ""))[:50] + "..."  # Truncate secret
+            source_metadata = item.get("SourceMetadata", {})
+            file_path = source_metadata.get("Data", {}).get("Filesystem", {}).get("file", "unknown")
+            
+            findings.append(RawFinding(
+                vulnerability_type="exposed_secret",
+                description=f"Обнаружен секрет типа {detector_name}",
+                evidence=f"Файл: {file_path}, Значение: {raw_value}",
+                affected_asset_id=asset_id,
+                raw_data={"tool": "trufflehog", "detector": detector_name, "file": file_path},
+            ))
+        return findings
+
+    # ------------------------------------------------------------------
+    # gitleaks — JSON (git secrets)
+    # ------------------------------------------------------------------
+
+    def parse_gitleaks_json(self, json_output: str, asset_id: str) -> list[RawFinding]:
+        findings: list[RawFinding] = []
+        try:
+            data = json.loads(json_output)
+        except json.JSONDecodeError:
+            return findings
+
+        items = data if isinstance(data, list) else [data]
+        for item in items:
+            rule_id = item.get("RuleID", item.get("ruleID", "unknown"))
+            file_path = item.get("File", item.get("file", "unknown"))
+            line_number = item.get("StartLine", item.get("line", 0))
+            secret = item.get("Secret", item.get("secret", ""))[:30] + "..."  # Truncate
+            
+            findings.append(RawFinding(
+                vulnerability_type="git_secret_leak",
+                description=f"Утечка секрета в git: {rule_id}",
+                evidence=f"Файл: {file_path}:{line_number}, Секрет: {secret}",
+                affected_asset_id=asset_id,
+                raw_data={"tool": "gitleaks", "rule": rule_id, "file": file_path, "line": line_number},
+            ))
+        return findings
+
+    # ------------------------------------------------------------------
+    # corsy — JSON (CORS misconfigurations)
+    # ------------------------------------------------------------------
+
+    def parse_corsy_json(self, json_output: str, asset_id: str) -> list[RawFinding]:
+        findings: list[RawFinding] = []
+        try:
+            data = json.loads(json_output)
+        except json.JSONDecodeError:
+            return findings
+
+        # corsy output varies, handle both dict and list
+        items = data if isinstance(data, list) else [data] if data else []
+        
+        for item in items:
+            url = item.get("url", "unknown")
+            vuln_type = item.get("type", item.get("class", "CORS misconfiguration"))
+            description = item.get("description", f"CORS уязвимость: {vuln_type}")
+            
+            findings.append(RawFinding(
+                vulnerability_type="cors_misconfiguration",
+                description=f"CORS уязвимость на {url}: {vuln_type}",
+                evidence=description,
+                affected_asset_id=asset_id,
+                raw_data={"tool": "corsy", **item},
+            ))
         return findings

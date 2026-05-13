@@ -1,11 +1,15 @@
 """Реальный плагин сканирования веб-приложений.
 
-Интегрирует 14 инструментов через ProcessManager:
-- Разведка: subfinder, amass, httpx, gau
-- Перебор: gobuster, ffuf
+Интегрирует 24 инструмента через ProcessManager:
+- Разведка: subfinder, amass, httpx, gau, assetfinder, katana
+- Перебор: gobuster, ffuf, arjun, paramspider
 - XSS: dalfox
 - WAF/Технологии: wafw00f, whatweb, wpscan
 - Уязвимости: nmap, nuclei, nikto, sqlmap
+- Секреты: trufflehog, gitleaks
+- SSL/TLS: testssl
+- CORS: corsy
+- DNS: dnsx
 
 Парсит вывод через OutputParser. Пропускает недоступные инструменты.
 """
@@ -13,6 +17,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from app.models.schemas import Asset, AssetType, RawFinding, ScanConfig
 from app.services.scan_plugins.base import ScanPlugin
@@ -25,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 class RealWebPlugin(ScanPlugin):
-    """Реальный плагин веб-сканирования с 14 инструментами."""
+    """Реальный плагин веб-сканирования с 24 инструментами."""
 
     CHECK_NAMES = [
         "subfinder_enum",
@@ -42,6 +47,16 @@ class RealWebPlugin(ScanPlugin):
         "dalfox_xss_scan",
         "sqlmap_injection",
         "nikto_config_check",
+        # New checks
+        "assetfinder_enum",
+        "katana_crawl",
+        "dnsx_dns",
+        "testssl_scan",
+        "arjun_params",
+        "paramspider_params",
+        "trufflehog_secrets",
+        "gitleaks_secrets",
+        "corsy_cors",
     ]
 
     _TOOL_CHECK_MAP = {
@@ -59,6 +74,16 @@ class RealWebPlugin(ScanPlugin):
         "dalfox": "dalfox_xss_scan",
         "sqlmap": "sqlmap_injection",
         "nikto": "nikto_config_check",
+        # New mappings
+        "assetfinder": "assetfinder_enum",
+        "katana": "katana_crawl",
+        "dnsx": "dnsx_dns",
+        "testssl": "testssl_scan",
+        "arjun": "arjun_params",
+        "paramspider": "paramspider_params",
+        "trufflehog": "trufflehog_secrets",
+        "gitleaks": "gitleaks_secrets",
+        "corsy": "corsy_cors",
     }
 
     def __init__(
@@ -84,35 +109,63 @@ class RealWebPlugin(ScanPlugin):
         
         logger.info("Starting scan for target: %s", target)
         
+        # Extract domain from target URL
+        domain = self._extract_domain(target)
+        
         # Log available tools
-        available_tools = []
-        for tool in ["subfinder", "amass", "httpx", "gau", "gobuster", "ffuf", 
-                     "wafw00f", "whatweb", "wpscan", "nmap", "nuclei", "dalfox", "sqlmap", "nikto"]:
-            if self._is_tool_available(tool):
-                available_tools.append(tool)
+        all_tools = [
+            "subfinder", "amass", "httpx", "gau", "gobuster", "ffuf", 
+            "wafw00f", "whatweb", "wpscan", "nmap", "nuclei", "dalfox", 
+            "sqlmap", "nikto", "assetfinder", "katana", "dnsx", "testssl",
+            "arjun", "paramspider", "trufflehog", "gitleaks", "corsy"
+        ]
+        available_tools = [t for t in all_tools if self._is_tool_available(t)]
         logger.info("Available tools: %s", ", ".join(available_tools) if available_tools else "NONE")
 
-        # --- Разведка ---
+        # --- Разведка поддоменов ---
         if self._is_tool_available("subfinder"):
             logger.info("Running subfinder...")
-            all_findings.extend(self._run_subfinder(target, asset.id))
+            all_findings.extend(self._run_subfinder(domain, asset.id))
+        if self._is_tool_available("assetfinder"):
+            logger.info("Running assetfinder...")
+            all_findings.extend(self._run_assetfinder(domain, asset.id))
         if self._is_tool_available("amass"):
             logger.info("Running amass...")
-            all_findings.extend(self._run_amass(target, asset.id))
+            all_findings.extend(self._run_amass(domain, asset.id))
+
+        # --- HTTP проверка ---
         if self._is_tool_available("httpx"):
             logger.info("Running httpx...")
             all_findings.extend(self._run_httpx(target, asset.id))
+
+        # --- DNS анализ ---
+        if self._is_tool_available("dnsx"):
+            logger.info("Running dnsx...")
+            all_findings.extend(self._run_dnsx(domain, asset.id))
+
+        # --- Сбор URL и параметров ---
         if self._is_tool_available("gau"):
             logger.info("Running gau...")
-            all_findings.extend(self._run_gau(target, asset.id))
+            all_findings.extend(self._run_gau(domain, asset.id))
+        if self._is_tool_available("katana"):
+            logger.info("Running katana...")
+            all_findings.extend(self._run_katana(target, asset.id))
+        if self._is_tool_available("paramspider"):
+            logger.info("Running paramspider...")
+            all_findings.extend(self._run_paramspider(domain, asset.id))
 
-        # --- Перебор ---
+        # --- Перебор директорий ---
         if self._is_tool_available("gobuster"):
             logger.info("Running gobuster...")
             all_findings.extend(self._run_gobuster(target, asset.id))
         if self._is_tool_available("ffuf"):
             logger.info("Running ffuf...")
             all_findings.extend(self._run_ffuf(target, asset.id))
+
+        # --- Поиск скрытых параметров ---
+        if self._is_tool_available("arjun"):
+            logger.info("Running arjun...")
+            all_findings.extend(self._run_arjun(target, asset.id))
 
         # --- WAF / Технологии ---
         if self._is_tool_available("wafw00f"):
@@ -124,6 +177,16 @@ class RealWebPlugin(ScanPlugin):
         if self._is_tool_available("wpscan"):
             logger.info("Running wpscan...")
             all_findings.extend(self._run_wpscan(target, asset.id))
+
+        # --- SSL/TLS анализ ---
+        if self._is_tool_available("testssl"):
+            logger.info("Running testssl...")
+            all_findings.extend(self._run_testssl(target, asset.id))
+
+        # --- CORS проверка ---
+        if self._is_tool_available("corsy"):
+            logger.info("Running corsy...")
+            all_findings.extend(self._run_corsy(target, asset.id))
 
         # --- Уязвимости ---
         if self._is_tool_available("nmap"):
@@ -141,9 +204,27 @@ class RealWebPlugin(ScanPlugin):
         if self._is_tool_available("nikto"):
             logger.info("Running nikto...")
             all_findings.extend(self._run_nikto(target, asset.id))
+
+        # --- Поиск секретов (если есть git репозиторий) ---
+        if self._is_tool_available("trufflehog"):
+            logger.info("Running trufflehog...")
+            all_findings.extend(self._run_trufflehog(target, asset.id))
+        if self._is_tool_available("gitleaks"):
+            logger.info("Running gitleaks...")
+            all_findings.extend(self._run_gitleaks(target, asset.id))
         
         logger.info("Scan completed. Total findings: %d", len(all_findings))
         return all_findings
+
+    def _extract_domain(self, target: str) -> str:
+        """Извлекает домен из URL."""
+        # Remove protocol
+        domain = re.sub(r'^https?://', '', target)
+        # Remove path
+        domain = domain.split('/')[0]
+        # Remove port
+        domain = domain.split(':')[0]
+        return domain
 
     def _is_tool_available(self, tool_name: str) -> bool:
         try:
@@ -309,3 +390,109 @@ class RealWebPlugin(ScanPlugin):
             logger.error("nikto failed (exit=%d)", result.exit_code)
             return []
         return self._output_parser.parse("nikto", result.stdout, asset_id)
+
+    # ==================================================================
+    # NEW DEEP SCANNING TOOLS
+    # ==================================================================
+
+    # ------------------------------------------------------------------
+    # assetfinder - subdomain discovery
+    # ------------------------------------------------------------------
+    def _run_assetfinder(self, domain: str, asset_id: str) -> list[RawFinding]:
+        command = ["assetfinder", "--subs-only", domain]
+        result = self._process_manager.execute(command, timeout_seconds=300)
+        if result.exit_code != 0 and not result.stdout.strip():
+            logger.error("assetfinder failed (exit=%d)", result.exit_code)
+            return []
+        return self._output_parser.parse("assetfinder", result.stdout, asset_id)
+
+    # ------------------------------------------------------------------
+    # katana - web crawler
+    # ------------------------------------------------------------------
+    def _run_katana(self, target: str, asset_id: str) -> list[RawFinding]:
+        command = ["katana", "-u", target, "-json", "-silent", "-d", "3"]
+        result = self._process_manager.execute(command, timeout_seconds=600)
+        if result.exit_code != 0 and not result.stdout.strip():
+            logger.error("katana failed (exit=%d)", result.exit_code)
+            return []
+        return self._output_parser.parse("katana", result.stdout, asset_id)
+
+    # ------------------------------------------------------------------
+    # dnsx - DNS toolkit
+    # ------------------------------------------------------------------
+    def _run_dnsx(self, domain: str, asset_id: str) -> list[RawFinding]:
+        command = ["dnsx", "-d", domain, "-json", "-silent", "-a", "-aaaa", "-cname", "-mx", "-txt"]
+        result = self._process_manager.execute(command, timeout_seconds=120)
+        if result.exit_code != 0 and not result.stdout.strip():
+            logger.error("dnsx failed (exit=%d)", result.exit_code)
+            return []
+        return self._output_parser.parse("dnsx", result.stdout, asset_id)
+
+    # ------------------------------------------------------------------
+    # testssl - SSL/TLS scanner
+    # ------------------------------------------------------------------
+    def _run_testssl(self, target: str, asset_id: str) -> list[RawFinding]:
+        # Extract host from URL
+        host = re.sub(r'^https?://', '', target).split('/')[0]
+        command = ["testssl", "--jsonfile", "-", "--quiet", host]
+        result = self._process_manager.execute(command, timeout_seconds=600)
+        if result.exit_code != 0 and not result.stdout.strip():
+            logger.error("testssl failed (exit=%d)", result.exit_code)
+            return []
+        return self._output_parser.parse("testssl", result.stdout, asset_id)
+
+    # ------------------------------------------------------------------
+    # arjun - hidden parameter discovery
+    # ------------------------------------------------------------------
+    def _run_arjun(self, target: str, asset_id: str) -> list[RawFinding]:
+        command = ["arjun", "-u", target, "-oJ", "-", "-q"]
+        result = self._process_manager.execute(command, timeout_seconds=600)
+        if result.exit_code != 0 and not result.stdout.strip():
+            logger.error("arjun failed (exit=%d)", result.exit_code)
+            return []
+        return self._output_parser.parse("arjun", result.stdout, asset_id)
+
+    # ------------------------------------------------------------------
+    # paramspider - parameter mining from archives
+    # ------------------------------------------------------------------
+    def _run_paramspider(self, domain: str, asset_id: str) -> list[RawFinding]:
+        command = ["paramspider", "-d", domain, "--quiet"]
+        result = self._process_manager.execute(command, timeout_seconds=300)
+        if result.exit_code != 0 and not result.stdout.strip():
+            logger.error("paramspider failed (exit=%d)", result.exit_code)
+            return []
+        return self._output_parser.parse("paramspider", result.stdout, asset_id)
+
+    # ------------------------------------------------------------------
+    # trufflehog - secret scanner
+    # ------------------------------------------------------------------
+    def _run_trufflehog(self, target: str, asset_id: str) -> list[RawFinding]:
+        # Scan for secrets in web content
+        command = ["trufflehog", "filesystem", "--json", "--no-update", target]
+        result = self._process_manager.execute(command, timeout_seconds=300)
+        # trufflehog returns 0 even with no findings
+        if not result.stdout.strip():
+            return []
+        return self._output_parser.parse("trufflehog", result.stdout, asset_id)
+
+    # ------------------------------------------------------------------
+    # gitleaks - git secret scanner
+    # ------------------------------------------------------------------
+    def _run_gitleaks(self, target: str, asset_id: str) -> list[RawFinding]:
+        # Try to find exposed .git directories
+        command = ["gitleaks", "detect", "--source", ".", "--report-format", "json", "--no-git"]
+        result = self._process_manager.execute(command, timeout_seconds=300)
+        if not result.stdout.strip():
+            return []
+        return self._output_parser.parse("gitleaks", result.stdout, asset_id)
+
+    # ------------------------------------------------------------------
+    # corsy - CORS misconfiguration scanner
+    # ------------------------------------------------------------------
+    def _run_corsy(self, target: str, asset_id: str) -> list[RawFinding]:
+        command = ["corsy", "-u", target, "-o", "json"]
+        result = self._process_manager.execute(command, timeout_seconds=120)
+        if result.exit_code != 0 and not result.stdout.strip():
+            logger.error("corsy failed (exit=%d)", result.exit_code)
+            return []
+        return self._output_parser.parse("corsy", result.stdout, asset_id)

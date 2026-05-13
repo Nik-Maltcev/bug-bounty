@@ -48,19 +48,55 @@ RUN GAU_VERSION=$(curl -sSL https://api.github.com/repos/lc/gau/releases/latest 
     && find /tmp/gau -name "gau" -type f -exec mv {} /usr/local/bin/gau \; \
     && chmod +x /usr/local/bin/gau && rm -rf /tmp/gau /tmp/gau.tar.gz
 
-# dalfox - skip for now, can be added later via go install
-# XSS scanning will be handled by nuclei templates
+# dalfox - XSS scanner
+RUN DALFOX_VERSION=$(curl -sSL https://api.github.com/repos/hahwul/dalfox/releases/latest | grep tag_name | cut -d'"' -f4 | tr -d v) \
+    && curl -sSL "https://github.com/hahwul/dalfox/releases/download/v${DALFOX_VERSION}/dalfox_${DALFOX_VERSION}_linux_amd64.tar.gz" -o /tmp/dalfox.tar.gz \
+    && tar -xzf /tmp/dalfox.tar.gz -C /usr/local/bin/ dalfox && rm /tmp/dalfox.tar.gz
+
+# === NEW TOOLS FOR DEEP SCANNING ===
+
+# trufflehog - secret scanner for git repos
+RUN TRUFFLEHOG_VERSION=$(curl -sSL https://api.github.com/repos/trufflesecurity/trufflehog/releases/latest | grep tag_name | cut -d'"' -f4 | tr -d v) \
+    && curl -sSL "https://github.com/trufflesecurity/trufflehog/releases/download/v${TRUFFLEHOG_VERSION}/trufflehog_${TRUFFLEHOG_VERSION}_linux_amd64.tar.gz" -o /tmp/trufflehog.tar.gz \
+    && tar -xzf /tmp/trufflehog.tar.gz -C /usr/local/bin/ trufflehog && rm /tmp/trufflehog.tar.gz
+
+# gitleaks - secret scanner
+RUN GITLEAKS_VERSION=$(curl -sSL https://api.github.com/repos/gitleaks/gitleaks/releases/latest | grep tag_name | cut -d'"' -f4 | tr -d v) \
+    && curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -o /tmp/gitleaks.tar.gz \
+    && tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin/ gitleaks && rm /tmp/gitleaks.tar.gz
+
+# assetfinder - subdomain discovery
+RUN curl -sSL "https://github.com/tomnomnom/assetfinder/releases/download/v0.1.1/assetfinder-linux-amd64-0.1.1.tgz" -o /tmp/assetfinder.tgz \
+    && tar -xzf /tmp/assetfinder.tgz -C /usr/local/bin/ && rm /tmp/assetfinder.tgz
+
+# katana - web crawler
+RUN KATANA_VERSION=$(curl -sSL https://api.github.com/repos/projectdiscovery/katana/releases/latest | grep tag_name | cut -d'"' -f4 | tr -d v) \
+    && curl -sSL "https://github.com/projectdiscovery/katana/releases/download/v${KATANA_VERSION}/katana_${KATANA_VERSION}_linux_amd64.zip" -o /tmp/katana.zip \
+    && unzip -o /tmp/katana.zip -d /usr/local/bin/ && rm /tmp/katana.zip
+
+# dnsx - DNS toolkit
+RUN DNSX_VERSION=$(curl -sSL https://api.github.com/repos/projectdiscovery/dnsx/releases/latest | grep tag_name | cut -d'"' -f4 | tr -d v) \
+    && curl -sSL "https://github.com/projectdiscovery/dnsx/releases/download/v${DNSX_VERSION}/dnsx_${DNSX_VERSION}_linux_amd64.zip" -o /tmp/dnsx.zip \
+    && unzip -o /tmp/dnsx.zip -d /usr/local/bin/ && rm /tmp/dnsx.zip
+
+# testssl.sh - SSL/TLS scanner
+RUN git clone --depth 1 https://github.com/drwetter/testssl.sh.git /opt/testssl \
+    && ln -s /opt/testssl/testssl.sh /usr/local/bin/testssl
 
 # Python security tools
-RUN pip install --no-cache-dir sqlmap wafw00f 2>/dev/null || true
+RUN pip install --no-cache-dir sqlmap wafw00f arjun corsy paramspider 2>/dev/null || true
 
 # Ruby security tools (whatweb, wpscan) - optional, may fail
 RUN gem install whatweb --no-document 2>/dev/null || echo "whatweb skipped"
 RUN gem install wpscan --no-document 2>/dev/null || echo "wpscan skipped"
 
-# Create wordlist directory with common wordlist
+# Create wordlist directory with multiple wordlists
 RUN mkdir -p /usr/share/wordlists \
-    && curl -sSL https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt -o /usr/share/wordlists/common.txt
+    && curl -sSL https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt -o /usr/share/wordlists/common.txt \
+    && curl -sSL https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/directory-list-2.3-medium.txt -o /usr/share/wordlists/directories-medium.txt \
+    && curl -sSL https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/api-endpoints.txt -o /usr/share/wordlists/api-endpoints.txt \
+    && curl -sSL https://raw.githubusercontent.com/danielmiessler/SecLists/master/Fuzzing/LFI/LFI-Jhaddix.txt -o /usr/share/wordlists/lfi.txt \
+    && curl -sSL https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/subdomains-top1million-5000.txt -o /usr/share/wordlists/subdomains.txt
 
 # Cleanup
 RUN apt-get purge -y build-essential && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
