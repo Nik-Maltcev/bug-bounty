@@ -233,6 +233,15 @@ class OutputParser:
             matched_at = item.get("matched-at") or item.get("host", "")
             name = item.get("info", {}).get("name", item.get("name", template_id))
             description = item.get("info", {}).get("description", "")
+            
+            # Извлекаем теги технологий из nuclei
+            tags = item.get("info", {}).get("tags", [])
+            if isinstance(tags, str):
+                tags = [t.strip() for t in tags.split(",")]
+            
+            # Извлекаем matcher-name (часто содержит версию)
+            matcher_name = item.get("matcher-name", "")
+            extracted_results = item.get("extracted-results", [])
 
             # Переводим на русский
             ru_name, ru_desc = self._translate_nuclei(template_id, name, description, severity)
@@ -242,7 +251,17 @@ class OutputParser:
                 description=f"{ru_name}: {ru_desc}" if ru_desc else ru_name,
                 evidence=f"Обнаружено на: {matched_at}",
                 affected_asset_id=asset_id,
-                raw_data={"tool": "nuclei", **item},
+                raw_data={
+                    "tool": "nuclei",
+                    "template": template_id,
+                    "severity": severity,
+                    "matched_at": matched_at,
+                    "name": name,
+                    "tags": tags,  # Теги для извлечения технологий
+                    "matcher_name": matcher_name,
+                    "extracted_results": extracted_results,
+                    **{k: v for k, v in item.items() if k not in ("template-id", "templateID", "info", "matched-at", "host", "matcher-name", "extracted-results")},
+                },
             ))
 
         return findings
@@ -532,13 +551,30 @@ class OutputParser:
             title = item.get("title", "")
             tech = item.get("technologies", [])
             webserver = item.get("webserver", "")
+            
+            # Формируем детальное описание технологий
+            tech_details = []
+            if webserver:
+                tech_details.append(f"Сервер: {webserver}")
+            if tech:
+                tech_details.append(f"Технологии: {', '.join(tech)}")
+            
+            tech_str = "; ".join(tech_details) if tech_details else "N/A"
 
             findings.append(RawFinding(
                 vulnerability_type="host_probe",
                 description=f"Живой хост: {url} (статус {status_code})",
-                evidence=f"Заголовок: {title}, Сервер: {webserver}, Технологии: {', '.join(tech) if tech else 'N/A'}",
+                evidence=f"Заголовок: {title or 'N/A'}, {tech_str}",
                 affected_asset_id=asset_id,
-                raw_data={"tool": "httpx", **item},
+                raw_data={
+                    "tool": "httpx",
+                    "url": url,
+                    "status_code": status_code,
+                    "title": title,
+                    "technologies": tech,  # Сохраняем как список для tech_extractor
+                    "webserver": webserver,
+                    **{k: v for k, v in item.items() if k not in ("url", "status_code", "title", "technologies", "webserver")},
+                },
             ))
         return findings
 

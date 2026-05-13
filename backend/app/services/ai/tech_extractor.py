@@ -141,6 +141,10 @@ class TechExtractor:
         # Объединяем все текстовые данные для поиска
         search_text = f"{evidence} {description} {raw_output}"
 
+        # === HTTPX: извлекаем технологии напрямую из raw_data ===
+        if source == "httpx":
+            fingerprints.extend(self._extract_httpx_technologies(finding))
+
         # Извлекаем из nmap-подобных данных
         if source in ("nmap", "masscan") or "port" in finding.raw_data:
             fingerprints.extend(self._extract_nmap_style(search_text, source))
@@ -162,6 +166,99 @@ class TechExtractor:
         fingerprints.extend(self._extract_general(search_text, source))
 
         return fingerprints
+
+    def _extract_httpx_technologies(self, finding: RawFinding) -> list[TechnologyFingerprint]:
+        """Извлекает технологии напрямую из httpx JSON output."""
+        fingerprints: list[TechnologyFingerprint] = []
+        
+        # httpx сохраняет технологии в raw_data["technologies"]
+        technologies = finding.raw_data.get("technologies", [])
+        webserver = finding.raw_data.get("webserver", "")
+        
+        # Обрабатываем список технологий от httpx
+        for tech_name in technologies:
+            if not tech_name:
+                continue
+            
+            # Определяем категорию технологии
+            category = self._guess_category(tech_name.lower())
+            
+            # Пытаемся извлечь версию из имени (например "PHP/7.4")
+            version = None
+            version_match = re.search(r"[/\s]([\d.]+)", tech_name)
+            if version_match:
+                version = version_match.group(1)
+                tech_name_clean = re.sub(r"[/\s][\d.]+.*", "", tech_name).strip()
+            else:
+                tech_name_clean = tech_name
+            
+            fingerprints.append(TechnologyFingerprint(
+                id=uuid.uuid4().hex[:12],
+                name=tech_name_clean.lower(),
+                version=version,
+                category=category,
+                source="httpx",
+                confidence=0.9,
+                raw_evidence=f"httpx tech-detect: {tech_name}",
+            ))
+        
+        # Обрабатываем webserver отдельно (например "nginx/1.18.0")
+        if webserver:
+            for pattern, name, category in NMAP_SERVICE_PATTERNS:
+                match = re.search(pattern, webserver, re.IGNORECASE)
+                if match:
+                    version = match.group(1) if match.lastindex and match.lastindex >= 1 else None
+                    fingerprints.append(TechnologyFingerprint(
+                        id=uuid.uuid4().hex[:12],
+                        name=name,
+                        version=version,
+                        category=category,
+                        source="httpx",
+                        confidence=0.95,
+                        raw_evidence=f"httpx webserver: {webserver}",
+                    ))
+                    break
+        
+        return fingerprints
+
+    def _guess_category(self, tech_name: str) -> TechCategory:
+        """Угадывает категорию технологии по имени."""
+        # CMS
+        cms_keywords = ["wordpress", "drupal", "joomla", "magento", "shopify", "prestashop", "wix", "squarespace"]
+        if any(kw in tech_name for kw in cms_keywords):
+            return TechCategory.CMS
+        
+        # Frameworks
+        framework_keywords = ["laravel", "django", "flask", "express", "spring", "rails", "react", "vue", "angular", "next", "nuxt", "svelte", "bootstrap", "jquery"]
+        if any(kw in tech_name for kw in framework_keywords):
+            return TechCategory.FRAMEWORK
+        
+        # Web servers
+        server_keywords = ["nginx", "apache", "iis", "tomcat", "lighttpd", "caddy"]
+        if any(kw in tech_name for kw in server_keywords):
+            return TechCategory.WEB_SERVER
+        
+        # Languages
+        lang_keywords = ["php", "python", "ruby", "java", "node", "asp.net", "perl"]
+        if any(kw in tech_name for kw in lang_keywords):
+            return TechCategory.LANGUAGE
+        
+        # Databases
+        db_keywords = ["mysql", "postgresql", "mongodb", "redis", "elasticsearch", "mariadb", "sqlite"]
+        if any(kw in tech_name for kw in db_keywords):
+            return TechCategory.DATABASE
+        
+        # CDN/WAF
+        cdn_keywords = ["cloudflare", "akamai", "fastly", "cloudfront", "sucuri", "imperva"]
+        if any(kw in tech_name for kw in cdn_keywords):
+            return TechCategory.CDN
+        
+        # Cache
+        cache_keywords = ["varnish", "memcached", "redis"]
+        if any(kw in tech_name for kw in cache_keywords):
+            return TechCategory.CACHE
+        
+        return TechCategory.OTHER
 
     def _extract_nmap_style(self, text: str, source: str) -> list[TechnologyFingerprint]:
         """Извлекает технологии из nmap-подобного вывода."""
@@ -244,13 +341,47 @@ class TechExtractor:
 
         template_id = finding.raw_data.get("template", "")
         matched_at = finding.raw_data.get("matched_at", "")
+        tags = finding.raw_data.get("tags", [])
+        matcher_name = finding.raw_data.get("matcher_name", "")
+        extracted_results = finding.raw_data.get("extracted_results", [])
 
-        # Nuclei templates часто содержат имя технологии
+        # Извлекаем технологии из тегов nuclei
+        tech_tags = ["wordpress", "drupal", "joomla", "magento", "shopify", "laravel", 
+                     "django", "flask", "express", "spring", "rails", "react", "vue", 
+                     "angular", "nginx", "apache", "iis", "tomcat", "php", "python", 
+                     "nodejs", "java", "mysql", "postgresql", "mongodb", "redis",
+                     "cloudflare", "aws", "azure", "jenkins", "gitlab", "grafana",
+                     "kibana", "elasticsearch", "docker", "kubernetes"]
+        
+        for tag in tags:
+            tag_lower = tag.lower()
+            if tag_lower in tech_tags:
+                category = self._guess_category(tag_lower)
+                fingerprints.append(TechnologyFingerprint(
+                    id=uuid.uuid4().hex[:12],
+                    name=tag_lower,
+                    version=None,
+                    category=category,
+                    source="nuclei",
+                    confidence=0.85,
+                    raw_evidence=f"Nuclei tag: {tag}",
+                ))
+
+        # Nuclei templates часто содержат имя технологии в template-id
         all_patterns = CMS_PATTERNS + FRAMEWORK_PATTERNS + NMAP_SERVICE_PATTERNS
         for pattern, name, category in all_patterns:
             if re.search(pattern, template_id, re.IGNORECASE) or re.search(pattern, finding.description, re.IGNORECASE):
-                # Пытаемся извлечь версию из описания
+                # Пытаемся извлечь версию из описания или matcher_name
+                version = None
                 version_match = re.search(rf"{name}[/\s]*([\d.]+)", finding.description, re.IGNORECASE)
+                if not version_match and matcher_name:
+                    version_match = re.search(r"([\d.]+)", matcher_name)
+                if not version_match and extracted_results:
+                    for result in extracted_results:
+                        version_match = re.search(r"([\d.]+)", str(result))
+                        if version_match:
+                            break
+                
                 version = version_match.group(1) if version_match else None
 
                 fingerprints.append(TechnologyFingerprint(
