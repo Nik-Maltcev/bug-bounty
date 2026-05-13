@@ -453,16 +453,37 @@ def create_scan_plan(
     }
 
 
+class AIAnalyzeRequest(BaseModel):
+    """Настройки ИИ-анализа."""
+    supervised_mode: bool = False
+    max_iterations: int = 3
+    max_requests: int = 50
+    rate_limit: float = 5.0
+
+
 @router.post("/api/scans/{scan_id}/ai-analyze")
 def start_ai_analysis(
     scan_id: str,
+    body: AIAnalyzeRequest | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict:
     """Запуск ИИ-анализа (Stage 2) для завершённого сканирования.
     
     Анализирует найденные уязвимости и генерирует дополнительные гипотезы.
+    Требует настроенный API-ключ LLM провайдера.
     """
+    import os
+    import threading
+    from app.models.database import VulnerabilityRecord, AIScanState
+    from app.models.schemas import RawFinding
+    from app.services.ai.ai_scanner import AIScanner
+    from app.services.ai.llm_provider_manager import LLMProviderManager
+    from app.models.ai_schemas import LLMConfig, ProviderType
+    
+    if body is None:
+        body = AIAnalyzeRequest()
+    
     scan = db.query(Scan).filter(Scan.id == scan_id).first()
     if scan is None:
         raise HTTPException(status_code=404, detail="Сканирование не найдено")
@@ -470,23 +491,226 @@ def start_ai_analysis(
     if scan.status != "completed":
         raise HTTPException(status_code=400, detail="Сканирование должно быть завершено для ИИ-анализа")
     
+    # Проверяем, не запущен ли уже AI-анализ
+    existing_state = db.query(AIScanState).filter(AIScanState.scan_id == scan_id).first()
+    if existing_state and existing_state.status == "running":
+        raise HTTPException(status_code=400, detail="ИИ-анализ уже запущен для этого сканирования")
+    
     # Получаем актив
     asset_row = db.query(AssetDB).filter(AssetDB.id == scan.asset_id).first()
     if asset_row is None:
         raise HTTPException(status_code=404, detail="Актив не найден")
     
     # Проверяем наличие уязвимостей
-    from app.models.database import VulnerabilityRecord
     vulns = db.query(VulnerabilityRecord).filter(VulnerabilityRecord.scan_id == scan_id).all()
     
     if not vulns:
         raise HTTPException(status_code=400, detail="Нет уязвимостей для анализа")
     
-    # TODO: Здесь будет интеграция с AIScanner для Stage 2
-    # Пока возвращаем заглушку
+    # Проверяем API ключ
+    api_key = os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("LLM_API_KEY")
+    
+    # Также проверяем сохранённую конфигурацию в БД
+    llm_manager = LLMProviderManager(db_session=db)
+    saved_config = llm_manager.load_provider_config()
+    
+    if not api_key and (not saved_config or not saved_config.api_key):
+        raise HTTPException(
+            status_code=400, 
+            detail="API-ключ LLM не настроен. Установите переменную окружения DEEPSEEK_API_KEY или настройте провайдер через /api/ai/config"
+        )
+    
+    # Создаём конфигурацию LLM
+    if saved_config and saved_config.api_key:
+        llm_config = saved_config
+    else:
+        llm_config = LLMConfig(
+            provider=ProviderType.DEEPSEEK,
+            api_key=api_key,
+            base_url="https://api.deepseek.com",
+            model="deepseek-chat",
+            temperature=0.3,
+        )
+    
+    # Конвертируем уязвимости в RawFinding
+    stage1_results = []
+    for v in vulns:
+        stage1_results.append(RawFinding(
+            tool_name=v.vulnerability_type.split("_")[0] if "_" in v.vulnerability_type else "scanner",
+            finding_type=v.vulnerability_type,
+            severity=v.severity,
+            target=asset_row.target,
+            raw_output=v.evidence or v.description,
+            parsed_data={
+                "description": v.description,
+                "steps": v.steps_to_reproduce,
+                "impact": v.impact_assessment,
+            },
+        ))
+    
+    # Запускаем AI-анализ в фоновом потоке
+    def run_ai_analysis():
+        from app.core.database import SessionLocal
+        thread_db = SessionLocal()
+        try:
+            thread_llm_manager = LLMProviderManager(db_session=thread_db)
+            
+            # Если есть сохранённая конфигурация, используем её
+            if saved_config and saved_config.api_key:
+                # Конфигурация уже загружена
+                pass
+            else:
+                # Сохраняем конфигурацию с API ключом
+                thread_llm_manager.save_provider_config(llm_config)
+            
+            ai_scanner = AIScanner(
+                llm_manager=thread_llm_manager,
+                db=thread_db,
+            )
+            
+            result = ai_scanner.run_stage2(
+                scan_id=scan_id,
+                stage1_results=stage1_results,
+                target_url=asset_row.target,
+                program_id=scan.program_id,
+                supervised_mode=body.supervised_mode,
+                max_iterations=body.max_iterations,
+                max_requests=body.max_requests,
+                rate_limit=body.rate_limit,
+            )
+            
+            # Логируем результат
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"AI Analysis completed for scan {scan_id}: {result.status}, {len(result.findings)} findings")
+            
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.exception(f"AI Analysis failed for scan {scan_id}: {e}")
+            
+            # Обновляем статус на failed
+            state = thread_db.query(AIScanState).filter(AIScanState.scan_id == scan_id).first()
+            if state:
+                state.status = "failed"
+                state.current_phase = "failed"
+                thread_db.commit()
+        finally:
+            thread_db.close()
+    
+    # Запускаем в отдельном потоке
+    thread = threading.Thread(target=run_ai_analysis, daemon=True)
+    thread.start()
+    
     return {
         "status": "started",
-        "message": f"ИИ-анализ запущен для {len(vulns)} уязвимостей. Результаты появятся в течение нескольких минут.",
+        "message": f"ИИ-анализ запущен для {len(vulns)} уязвимостей. Отслеживайте прогресс через /api/scans/{scan_id}/ai-status",
         "scan_id": scan_id,
         "vulnerabilities_count": len(vulns),
+        "settings": {
+            "supervised_mode": body.supervised_mode,
+            "max_iterations": body.max_iterations,
+            "max_requests": body.max_requests,
+            "rate_limit": body.rate_limit,
+        }
+    }
+
+
+@router.get("/api/scans/{scan_id}/ai-status")
+def get_ai_analysis_status(
+    scan_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Получить статус ИИ-анализа (Stage 2).
+    
+    Возвращает текущую фазу, прогресс и найденные уязвимости.
+    """
+    from app.models.database import AIScanState, AIFindingRecord
+    
+    scan = db.query(Scan).filter(Scan.id == scan_id).first()
+    if scan is None:
+        raise HTTPException(status_code=404, detail="Сканирование не найдено")
+    
+    state = db.query(AIScanState).filter(AIScanState.scan_id == scan_id).first()
+    if state is None:
+        return {
+            "status": "not_started",
+            "message": "ИИ-анализ не запускался для этого сканирования",
+            "scan_id": scan_id,
+        }
+    
+    # Получаем AI findings
+    ai_findings = db.query(AIFindingRecord).filter(AIFindingRecord.scan_id == scan_id).all()
+    
+    # Вычисляем прогресс
+    total_hypotheses = state.hypotheses_generated or 0
+    tested = state.hypotheses_tested or 0
+    percent = int((tested / total_hypotheses * 100) if total_hypotheses > 0 else 0)
+    
+    return {
+        "status": state.status,
+        "current_phase": state.current_phase,
+        "percent_complete": min(percent, 100),
+        "scan_id": scan_id,
+        "stats": {
+            "technologies_found": state.technologies_found or 0,
+            "hypotheses_generated": state.hypotheses_generated or 0,
+            "hypotheses_tested": state.hypotheses_tested or 0,
+            "requests_executed": state.requests_executed or 0,
+            "requests_blocked": state.requests_blocked or 0,
+            "findings_confirmed": state.findings_confirmed or 0,
+        },
+        "settings": {
+            "supervised_mode": state.supervised_mode,
+            "max_iterations": state.max_iterations,
+            "max_requests": state.max_requests,
+            "rate_limit": state.rate_limit,
+        },
+        "ai_findings": [
+            {
+                "id": f.id,
+                "vulnerability_type": f.vulnerability_type,
+                "severity": f.severity,
+                "confidence": f.confidence,
+                "description": f.description,
+                "requires_manual_review": f.requires_manual_review,
+            }
+            for f in ai_findings
+        ],
+        "started_at": state.started_at.isoformat() if state.started_at else None,
+        "completed_at": state.completed_at.isoformat() if state.completed_at else None,
+    }
+
+
+@router.post("/api/scans/{scan_id}/ai-stop")
+def stop_ai_analysis(
+    scan_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Остановить ИИ-анализ (Kill Switch).
+    
+    Немедленно останавливает текущий AI-анализ.
+    """
+    from app.models.database import AIScanState
+    
+    state = db.query(AIScanState).filter(AIScanState.scan_id == scan_id).first()
+    if state is None:
+        raise HTTPException(status_code=404, detail="ИИ-анализ не найден")
+    
+    if state.status != "running":
+        raise HTTPException(status_code=400, detail=f"ИИ-анализ не запущен (статус: {state.status})")
+    
+    # Обновляем статус на cancelled
+    state.status = "cancelled"
+    state.current_phase = "cancelled"
+    from datetime import datetime, UTC
+    state.completed_at = datetime.now(UTC)
+    db.commit()
+    
+    return {
+        "status": "cancelled",
+        "message": "ИИ-анализ остановлен",
+        "scan_id": scan_id,
     }

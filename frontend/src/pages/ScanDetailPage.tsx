@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { getScan, getScanVulnerabilities, startAIScan } from '../services/api';
+import { getScan, getScanVulnerabilities, startAIScan, getAIStatus, stopAIScan } from '../services/api';
 import type { ScanRecord, Vulnerability } from '../types';
+import type { AIStatusResponse } from '../services/api';
 import { 
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend
 } from 'recharts';
@@ -22,7 +23,12 @@ import {
   FileText,
   Shield,
   Bug,
-  Zap
+  Zap,
+  StopCircle,
+  Cpu,
+  Target,
+  FlaskConical,
+  CheckCheck
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -121,8 +127,29 @@ export default function ScanDetailPage() {
   const [vulns, setVulns] = useState<Vulnerability[]>([]);
   const [loading, setLoading] = useState(true);
   const [aiLoading, setAiLoading] = useState(false);
-  const [aiStatus, setAiStatus] = useState<string | null>(null);
+  const [aiStatus, setAiStatus] = useState<AIStatusResponse | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
   const [expandedVulns, setExpandedVulns] = useState<Set<string>>(new Set());
+
+  // Polling for AI status
+  const pollAIStatus = useCallback(async () => {
+    if (!id) return;
+    try {
+      const status = await getAIStatus(id);
+      setAiStatus(status);
+      
+      // If completed or failed, refresh vulnerabilities
+      if (status.status === 'completed' || status.status === 'failed' || status.status === 'cancelled') {
+        const newVulns = await getScanVulnerabilities(id).catch(() => []);
+        setVulns(newVulns);
+      }
+      
+      return status;
+    } catch {
+      // AI analysis not started yet
+      return null;
+    }
+  }, [id]);
 
   useEffect(() => {
     if (!id) return;
@@ -133,30 +160,55 @@ export default function ScanDetailPage() {
     ]).then(([scanData, vulnsData]) => {
       setScan(scanData);
       setVulns(vulnsData);
+      // Check if AI analysis is running
+      pollAIStatus();
     }).finally(() => {
       setLoading(false);
     });
-  }, [id]);
+  }, [id, pollAIStatus]);
+
+  // Poll AI status while running
+  useEffect(() => {
+    if (!aiStatus || aiStatus.status !== 'running') return;
+    
+    const interval = setInterval(async () => {
+      const status = await pollAIStatus();
+      if (status && (status.status === 'completed' || status.status === 'failed' || status.status === 'cancelled')) {
+        clearInterval(interval);
+      }
+    }, 3000);
+    
+    return () => clearInterval(interval);
+  }, [aiStatus, pollAIStatus]);
 
   const handleStartAI = async () => {
     if (!id) return;
     setAiLoading(true);
-    setAiStatus(null);
+    setAiError(null);
     
     try {
-      const result = await startAIScan(id);
-      setAiStatus(result.message || 'ИИ-анализ запущен');
-      setTimeout(async () => {
-        const newVulns = await getScanVulnerabilities(id).catch(() => []);
-        setVulns(newVulns);
-      }, 5000);
+      await startAIScan(id);
+      // Start polling
+      const status = await pollAIStatus();
+      if (status) {
+        setAiStatus(status);
+      }
     } catch (err: unknown) {
-      setAiStatus(
-        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 
-        'Ошибка запуска ИИ-анализа'
-      );
+      const errorMsg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 
+        'Ошибка запуска ИИ-анализа';
+      setAiError(errorMsg);
     } finally {
       setAiLoading(false);
+    }
+  };
+
+  const handleStopAI = async () => {
+    if (!id) return;
+    try {
+      await stopAIScan(id);
+      await pollAIStatus();
+    } catch (err: unknown) {
+      setAiError('Ошибка остановки ИИ-анализа');
     }
   };
 
@@ -389,19 +441,121 @@ export default function ScanDetailPage() {
                   <p className="text-slate-400 text-sm">Глубокий анализ с генерацией PoC</p>
                 </div>
               </div>
-              <button onClick={handleStartAI} disabled={aiLoading}
-                className={clsx(
-                  "px-6 py-3 rounded-xl font-medium transition-all flex items-center gap-2",
-                  aiLoading ? "bg-slate-700 text-slate-400 cursor-not-allowed" 
-                           : "bg-purple-600 text-white hover:bg-purple-500 shadow-lg shadow-purple-500/25"
-                )}>
-                {aiLoading ? <><Loader2 className="w-5 h-5 animate-spin" />Анализирую...</> 
-                          : <><Brain className="w-5 h-5" />Запустить</>}
-              </button>
+              
+              {/* Buttons based on AI status */}
+              {aiStatus?.status === 'running' ? (
+                <button onClick={handleStopAI}
+                  className="px-6 py-3 rounded-xl font-medium transition-all flex items-center gap-2 bg-red-600 text-white hover:bg-red-500">
+                  <StopCircle className="w-5 h-5" />Остановить
+                </button>
+              ) : (
+                <button onClick={handleStartAI} disabled={aiLoading}
+                  className={clsx(
+                    "px-6 py-3 rounded-xl font-medium transition-all flex items-center gap-2",
+                    aiLoading ? "bg-slate-700 text-slate-400 cursor-not-allowed" 
+                             : "bg-purple-600 text-white hover:bg-purple-500 shadow-lg shadow-purple-500/25"
+                  )}>
+                  {aiLoading ? <><Loader2 className="w-5 h-5 animate-spin" />Запуск...</> 
+                            : <><Brain className="w-5 h-5" />Запустить</>}
+                </button>
+              )}
             </div>
-            {aiStatus && (
-              <p className={clsx("mt-4 text-sm", aiStatus.includes('Ошибка') ? "text-red-400" : "text-green-400")}>
-                {aiStatus}
+            
+            {/* AI Status Display */}
+            {aiStatus && aiStatus.status !== 'not_started' && (
+              <div className="mt-4 space-y-3">
+                {/* Progress bar */}
+                {aiStatus.status === 'running' && (
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-400">
+                        Фаза: <span className="text-purple-400">{aiStatus.current_phase}</span>
+                      </span>
+                      <span className="text-purple-400">{aiStatus.percent_complete}%</span>
+                    </div>
+                    <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-gradient-to-r from-purple-500 to-blue-500 transition-all duration-500"
+                        style={{ width: `${aiStatus.percent_complete}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+                
+                {/* Stats grid */}
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="bg-slate-800/50 rounded-lg p-3 text-center">
+                    <Cpu className="w-4 h-4 text-blue-400 mx-auto mb-1" />
+                    <p className="text-lg font-bold text-white">{aiStatus.stats.technologies_found}</p>
+                    <p className="text-xs text-slate-500">Технологий</p>
+                  </div>
+                  <div className="bg-slate-800/50 rounded-lg p-3 text-center">
+                    <FlaskConical className="w-4 h-4 text-amber-400 mx-auto mb-1" />
+                    <p className="text-lg font-bold text-white">
+                      {aiStatus.stats.hypotheses_tested}/{aiStatus.stats.hypotheses_generated}
+                    </p>
+                    <p className="text-xs text-slate-500">Гипотез</p>
+                  </div>
+                  <div className="bg-slate-800/50 rounded-lg p-3 text-center">
+                    <Target className="w-4 h-4 text-green-400 mx-auto mb-1" />
+                    <p className="text-lg font-bold text-white">{aiStatus.stats.findings_confirmed}</p>
+                    <p className="text-xs text-slate-500">Подтверждено</p>
+                  </div>
+                </div>
+                
+                {/* Status message */}
+                {aiStatus.status === 'completed' && (
+                  <div className="flex items-center gap-2 text-green-400 text-sm">
+                    <CheckCheck className="w-4 h-4" />
+                    Анализ завершён. Найдено {aiStatus.stats.findings_confirmed} новых уязвимостей.
+                  </div>
+                )}
+                {aiStatus.status === 'failed' && (
+                  <div className="flex items-center gap-2 text-red-400 text-sm">
+                    <XCircle className="w-4 h-4" />
+                    Анализ завершился с ошибкой
+                  </div>
+                )}
+                {aiStatus.status === 'cancelled' && (
+                  <div className="flex items-center gap-2 text-amber-400 text-sm">
+                    <StopCircle className="w-4 h-4" />
+                    Анализ остановлен пользователем
+                  </div>
+                )}
+                
+                {/* AI Findings preview */}
+                {aiStatus.ai_findings && aiStatus.ai_findings.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-slate-700">
+                    <p className="text-xs text-slate-500 uppercase tracking-wider mb-2">
+                      Найденные AI уязвимости
+                    </p>
+                    <div className="space-y-2 max-h-40 overflow-y-auto">
+                      {aiStatus.ai_findings.map(f => (
+                        <div key={f.id} className="flex items-center gap-2 text-sm">
+                          <span className={clsx(
+                            "px-2 py-0.5 text-xs rounded",
+                            f.severity === 'critical' ? "bg-red-500/20 text-red-400" :
+                            f.severity === 'high' ? "bg-orange-500/20 text-orange-400" :
+                            f.severity === 'medium' ? "bg-amber-500/20 text-amber-400" :
+                            "bg-blue-500/20 text-blue-400"
+                          )}>
+                            {f.severity}
+                          </span>
+                          <span className="text-slate-300 truncate">{f.vulnerability_type}</span>
+                          <span className="text-slate-500 text-xs">({Math.round(f.confidence * 100)}%)</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            
+            {/* Error message */}
+            {aiError && (
+              <p className="mt-4 text-sm text-red-400 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4" />
+                {aiError}
               </p>
             )}
           </div>

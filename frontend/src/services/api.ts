@@ -144,8 +144,61 @@ export async function getScanVulnerabilities(scanId: string): Promise<Vulnerabil
   return res.data;
 }
 
-export async function startAIScan(scanId: string): Promise<{ status: string; message: string }> {
-  const res = await api.post<{ status: string; message: string }>(`/api/scans/${scanId}/ai-analyze`);
+export interface AIAnalyzeSettings {
+  supervised_mode?: boolean;
+  max_iterations?: number;
+  max_requests?: number;
+  rate_limit?: number;
+}
+
+export interface AIAnalyzeResponse {
+  status: string;
+  message: string;
+  scan_id: string;
+  vulnerabilities_count: number;
+  settings?: AIAnalyzeSettings;
+}
+
+export interface AIFinding {
+  id: string;
+  vulnerability_type: string;
+  severity: string;
+  confidence: number;
+  description: string;
+  requires_manual_review: boolean;
+}
+
+export interface AIStatusResponse {
+  status: string;
+  current_phase: string;
+  percent_complete: number;
+  scan_id: string;
+  stats: {
+    technologies_found: number;
+    hypotheses_generated: number;
+    hypotheses_tested: number;
+    requests_executed: number;
+    requests_blocked: number;
+    findings_confirmed: number;
+  };
+  settings: AIAnalyzeSettings;
+  ai_findings: AIFinding[];
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export async function startAIScan(scanId: string, settings?: AIAnalyzeSettings): Promise<AIAnalyzeResponse> {
+  const res = await api.post<AIAnalyzeResponse>(`/api/scans/${scanId}/ai-analyze`, settings || {});
+  return res.data;
+}
+
+export async function getAIStatus(scanId: string): Promise<AIStatusResponse> {
+  const res = await api.get<AIStatusResponse>(`/api/scans/${scanId}/ai-status`);
+  return res.data;
+}
+
+export async function stopAIScan(scanId: string): Promise<{ status: string; message: string }> {
+  const res = await api.post<{ status: string; message: string }>(`/api/scans/${scanId}/ai-stop`);
   return res.data;
 }
 
