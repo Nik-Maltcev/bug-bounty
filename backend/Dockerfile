@@ -65,6 +65,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# DeepSeek API key for AI analysis (Stage 2)
+ENV DEEPSEEK_API_KEY=sk-305c670c93784a95882d8b25cd72491e
+
 # Create default user on first run
 RUN python -c "\
 from app.core.database import init_db, SessionLocal; \
