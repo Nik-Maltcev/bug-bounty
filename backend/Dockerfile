@@ -120,10 +120,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # LLM API keys for AI analysis (Stage 2)
-# Claude Opus 4.6 (Anthropic) - primary
-ENV ANTHROPIC_API_KEY=
-# DeepSeek - fallback
-ENV DEEPSEEK_API_KEY=sk-305c670c93784a95882d8b25cd72491e
+# Set via docker run -e ANTHROPIC_API_KEY=... or docker-compose
+# Claude Opus 4.6 (Anthropic) - primary, DeepSeek - fallback
+ENV ANTHROPIC_API_KEY=""
+ENV DEEPSEEK_API_KEY=""
 
 # Create default user on first run
 RUN python -c "\
