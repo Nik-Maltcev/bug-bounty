@@ -132,6 +132,7 @@ class VulnerabilityRecord(Base):
     evidence: Mapped[str] = mapped_column(Text, default="")
     impact_assessment: Mapped[str] = mapped_column(Text, default="")
     remediation: Mapped[str] = mapped_column(Text, default="")
+    raw_data_json: Mapped[str] = mapped_column(Text, default="{}")  # JSON с данными от инструментов (технологии и т.д.)
     status: Mapped[str] = mapped_column(String, default="new")  # new, reported, accepted, rejected
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 

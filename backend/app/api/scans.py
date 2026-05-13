@@ -11,6 +11,7 @@
 Требования: 4.1, 4.2, 2.1
 """
 
+import json
 import uuid
 from datetime import datetime
 from urllib.parse import urlparse
@@ -546,17 +547,28 @@ def start_ai_analysis(
     # Конвертируем уязвимости в RawFinding
     stage1_results = []
     for v in vulns:
+        # Загружаем raw_data из JSON
+        raw_data = {}
+        if hasattr(v, 'raw_data_json') and v.raw_data_json:
+            try:
+                raw_data = json.loads(v.raw_data_json)
+            except json.JSONDecodeError:
+                pass
+        
+        # Добавляем базовые данные
+        raw_data.update({
+            "severity": v.severity,
+            "steps": v.steps_to_reproduce,
+            "impact": v.impact_assessment,
+            "source": "stage1_scan",
+        })
+        
         stage1_results.append(RawFinding(
             vulnerability_type=v.vulnerability_type,
             description=v.description or "Уязвимость обнаружена сканером",
             evidence=v.evidence or "",
             affected_asset_id=scan.asset_id,
-            raw_data={
-                "severity": v.severity,
-                "steps": v.steps_to_reproduce,
-                "impact": v.impact_assessment,
-                "source": "stage1_scan",
-            },
+            raw_data=raw_data,
         ))
     
     # Запускаем AI-анализ в фоновом потоке

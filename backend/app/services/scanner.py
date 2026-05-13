@@ -6,6 +6,7 @@
 - Сохранение находок в БД
 """
 
+import json
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -440,6 +441,7 @@ class Scanner:
             evidence=finding.evidence,
             impact_assessment=enriched["impact_assessment"],
             remediation=enriched["remediation"],
+            raw_data_json=json.dumps(finding.raw_data, ensure_ascii=False) if finding.raw_data else "{}",
             status="new",
         )
         db.add(record)
