@@ -298,3 +298,309 @@ py -m pytest tests/ -v
 | GET | `/api/compliance/{program_id}` | Статус соответствия |
 | GET | `/api/audit` | Журнал аудита |
 | GET | `/api/audit/export` | Экспорт журнала (JSON) |
+
+---
+
+## 10. AI-Driven Scan (Stage 2)
+
+Stage 2 — это **интеллектуальный анализ** результатов обычного сканирования с помощью LLM (DeepSeek). Он автоматически генерирует и проверяет гипотезы об уязвимостях.
+
+### Как это работает
+
+```
+Stage 1 (обычное сканирование)          Stage 2 (AI-анализ)
+┌─────────────────────────────┐        ┌─────────────────────────────────────┐
+│ nuclei, nmap, nikto,        │        │  1. Извлечение технологий           │
+│ sqlmap, httpx, gobuster...  │───────▶│  2. Генерация гипотез (LLM)         │
+│                             │        │  3. Выполнение запросов             │
+│ Находки: headers, ports,    │        │  4. Анализ ответов (LLM)            │
+│ vulns, fingerprints...      │        │  5. Подтверждение уязвимостей       │
+└─────────────────────────────┘        └─────────────────────────────────────┘
+```
+
+### Фазы Stage 2
+
+#### Фаза 1: Извлечение технологий (`tech_extraction`)
+
+LLM анализирует сырые данные Stage 1 и определяет используемые технологии:
+
+```
+Входные данные:
+  "Server: nginx/1.18.0"
+  "X-Powered-By: PHP/7.4"
+  WordPress fingerprint
+
+Результат:
+  - nginx v1.18.0 (CVE-2021-23017)
+  - PHP v7.4.3
+  - WordPress v5.8
+```
+
+#### Фаза 2: Генерация гипотез (`hypothesis_testing`)
+
+На основе технологий и находок LLM генерирует гипотезы для проверки:
+
+```json
+{
+  "vulnerability_type": "sql_injection",
+  "description": "Параметр 'id' может быть уязвим к SQL-инъекции",
+  "target_url": "https://example.com/api/users?id=1",
+  "rationale": "Обнаружен PHP + MySQL, параметр id передаётся в запрос без валидации"
+}
+```
+
+#### Фаза 3: Выполнение запросов
+
+Для каждой гипотезы создаётся тестовый HTTP-запрос:
+
+```
+GET /api/users?id=1' OR '1'='1
+```
+
+Перед выполнением проверяется:
+- **Compliance** — не нарушает ли запрос правила программы
+- **Rate Limit** — не превышен ли лимит запросов
+- **Supervised Mode** — нужно ли одобрение пользователя
+
+#### Фаза 4: Анализ ответов (`analysis`)
+
+LLM анализирует ответ сервера и определяет, подтверждена ли уязвимость:
+
+```
+Ответ: HTTP 200, тело содержит данные других пользователей
+Вердикт: ПОДТВЕРЖДЕНО (confidence: 85%)
+```
+
+Если уязвимость подтверждена — создаётся AIFinding с полным PoC.
+
+### Итеративный процесс
+
+Stage 2 работает итеративно — каждая итерация углубляет анализ:
+
+```
+Итерация 0: Базовые гипотезы из Stage 1
+    ↓ (нашли SQL-инъекцию)
+Итерация 1: Проверяем другие параметры, пробуем обход WAF
+    ↓ (нашли ещё 2 точки входа)
+Итерация 2: Пробуем эксплуатацию, извлечение данных
+    ↓
+(до max_iterations или пока есть гипотезы)
+```
+
+### Настройки
+
+| Параметр | По умолчанию | Описание |
+|----------|--------------|----------|
+| `max_iterations` | 3 | Максимум итераций анализа |
+| `max_requests` | 50 | Максимум HTTP-запросов к цели |
+| `rate_limit` | 5.0 | Запросов в секунду |
+| `supervised_mode` | false | Требовать одобрение каждого запроса |
+
+### API эндпоинты Stage 2
+
+| Метод | URL | Описание |
+|---|---|---|
+| POST | `/api/scans/{id}/ai-analyze` | Запуск AI-анализа |
+| GET | `/api/scans/{id}/ai-status` | Статус и прогресс |
+| POST | `/api/scans/{id}/ai-stop` | Остановка (Kill Switch) |
+| GET | `/api/ai/scans/{id}/stage2/findings` | Найденные уязвимости |
+| GET | `/api/ai/scans/{id}/stage2/technologies` | Извлечённые технологии |
+| GET | `/api/ai/scans/{id}/stage2/audit` | Audit Trail решений AI |
+
+### Пример запуска
+
+```bash
+# Запуск AI-анализа
+curl -X POST http://localhost:8000/api/scans/{scan_id}/ai-analyze \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "supervised_mode": false,
+    "max_iterations": 3,
+    "max_requests": 50,
+    "rate_limit": 5.0
+  }'
+
+# Проверка статуса
+curl http://localhost:8000/api/scans/{scan_id}/ai-status \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### Пример ответа статуса
+
+```json
+{
+  "status": "running",
+  "current_phase": "hypothesis_testing",
+  "percent_complete": 45,
+  "stats": {
+    "technologies_found": 5,
+    "hypotheses_generated": 20,
+    "hypotheses_tested": 9,
+    "requests_executed": 15,
+    "requests_blocked": 2,
+    "findings_confirmed": 2
+  },
+  "ai_findings": [
+    {
+      "id": "ai_abc123",
+      "vulnerability_type": "sql_injection",
+      "severity": "high",
+      "confidence": 0.85,
+      "description": "SQL-инъекция в параметре id"
+    }
+  ]
+}
+```
+
+### Настройка LLM провайдера
+
+Stage 2 использует DeepSeek API. Настройка:
+
+**Вариант 1: Переменная окружения**
+```bash
+export DEEPSEEK_API_KEY=sk-your-api-key
+```
+
+**Вариант 2: Через API**
+```bash
+curl -X PUT http://localhost:8000/api/ai/settings \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "deepseek",
+    "api_key": "sk-your-api-key",
+    "model": "deepseek-chat"
+  }'
+```
+
+### Безопасность Stage 2
+
+- **Compliance Check** — каждый запрос проверяется на соответствие правилам программы
+- **Rate Limiting** — защита от случайного DDoS цели
+- **Kill Switch** — мгновенная остановка через `/ai-stop`
+- **Supervised Mode** — ручное одобрение каждого запроса
+- **Audit Trail** — полный лог всех решений AI с обоснованием
+
+### Использование в UI
+
+1. Запустите обычное сканирование (Stage 1)
+2. Дождитесь завершения
+3. На странице деталей сканирования нажмите **"Запустить"** в секции "ИИ-анализ (Stage 2)"
+4. Наблюдайте за прогрессом в реальном времени
+5. Новые уязвимости появятся в общем списке с пометкой AI
+
+
+---
+
+## 11. Docker деплой
+
+### Сборка и запуск
+
+```bash
+# Создание сети
+docker network create bugbounty-net
+
+# Бэкенд
+docker build -t bug-bounty-backend ./backend
+docker run -d \
+  --name backend \
+  --network bugbounty-net \
+  -p 8000:8000 \
+  -e DEEPSEEK_API_KEY=sk-your-key \
+  bug-bounty-backend
+
+# Фронтенд
+docker build -t bug-bounty-frontend ./frontend
+docker run -d \
+  --name bb-frontend \
+  --network bugbounty-net \
+  -p 80:80 \
+  bug-bounty-frontend
+```
+
+### Обновление
+
+```bash
+cd ~/bug-bounty
+git pull origin master
+
+# Пересборка бэкенда
+docker build -t bug-bounty-backend ./backend
+docker stop backend && docker rm backend
+docker run -d --name backend --network bugbounty-net -p 8000:8000 -e DEEPSEEK_API_KEY=sk-xxx bug-bounty-backend
+
+# Пересборка фронтенда
+docker build -t bug-bounty-frontend ./frontend
+docker stop bb-frontend && docker rm bb-frontend
+docker run -d --name bb-frontend --network bugbounty-net -p 80:80 bug-bounty-frontend
+```
+
+---
+
+## 12. Инструменты сканирования
+
+Docker-образ бэкенда включает следующие инструменты безопасности:
+
+| Инструмент | Назначение | Статус |
+|------------|------------|--------|
+| **nmap** | Сканирование портов и сервисов | ✅ Установлен |
+| **nuclei** | Поиск уязвимостей по шаблонам | ✅ Установлен |
+| **nikto** | Сканирование веб-серверов | ✅ Установлен |
+| **sqlmap** | Поиск SQL-инъекций | ✅ Установлен |
+| **httpx** | Проверка живых хостов, технологии | ✅ Установлен |
+| **subfinder** | Поиск поддоменов | ✅ Установлен |
+| **gobuster** | Перебор директорий | ✅ Установлен |
+| **ffuf** | Фаззинг веб-приложений | ✅ Установлен |
+| **gau** | Сбор исторических URL (Wayback) | ✅ Установлен |
+| **wafw00f** | Определение WAF | ✅ Установлен |
+| **whatweb** | Fingerprinting технологий | ⚠️ Опционально (Ruby) |
+| **wpscan** | Сканирование WordPress | ⚠️ Опционально (Ruby) |
+
+### Порядок выполнения при сканировании
+
+1. **httpx** — проверка доступности, определение технологий
+2. **wafw00f** — определение WAF
+3. **subfinder** — поиск поддоменов
+4. **nmap** — сканирование портов
+5. **nuclei** — поиск уязвимостей по шаблонам
+6. **nikto** — сканирование веб-сервера
+7. **gobuster** — перебор директорий
+8. **gau** — сбор исторических URL
+9. **ffuf** — фаззинг параметров
+10. **sqlmap** — проверка SQL-инъекций (если найдены параметры)
+
+---
+
+## 13. База знаний уязвимостей
+
+Система автоматически обогащает найденные уязвимости информацией:
+
+- **Описание** — что это за уязвимость
+- **Шаги воспроизведения** — как проверить
+- **Оценка влияния** — потенциальный ущерб (CVSS-подобная оценка)
+- **Рекомендации** — как исправить
+- **Ссылки** — OWASP, CWE, документация
+
+### Поддерживаемые типы уязвимостей
+
+- Missing SRI (Subresource Integrity)
+- HTTP Security Headers (CSP, HSTS, X-Frame-Options, etc.)
+- SQL Injection
+- XSS (Cross-Site Scripting)
+- Open Ports
+- Subdomain Takeover
+- Historical URLs / Information Disclosure
+- WAF Detection
+- Technology Fingerprint
+- CORS Misconfiguration
+- Directory Listing
+- Git Config Exposure
+- Sensitive Files Exposure
+- SSL/TLS Issues
+
+---
+
+## 14. Лицензия
+
+MIT License
