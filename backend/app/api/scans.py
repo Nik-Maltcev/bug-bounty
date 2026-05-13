@@ -536,15 +536,15 @@ def start_ai_analysis(
     stage1_results = []
     for v in vulns:
         stage1_results.append(RawFinding(
-            tool_name=v.vulnerability_type.split("_")[0] if "_" in v.vulnerability_type else "scanner",
-            finding_type=v.vulnerability_type,
-            severity=v.severity,
-            target=asset_row.target,
-            raw_output=v.evidence or v.description,
-            parsed_data={
-                "description": v.description,
+            vulnerability_type=v.vulnerability_type,
+            description=v.description or "Уязвимость обнаружена сканером",
+            evidence=v.evidence or "",
+            affected_asset_id=scan.asset_id,
+            raw_data={
+                "severity": v.severity,
                 "steps": v.steps_to_reproduce,
                 "impact": v.impact_assessment,
+                "source": "stage1_scan",
             },
         ))
     
