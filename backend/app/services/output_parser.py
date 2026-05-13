@@ -94,7 +94,7 @@ class OutputParser:
                 service_version = service_el.get("version", "") if service_el is not None else ""
                 product = service_el.get("product", "") if service_el is not None else ""
 
-                description = f"Open port {port_id}/{protocol}: {service_name}"
+                description = f"Открытый порт {port_id}/{protocol}: {service_name}"
                 if product:
                     description += f" ({product}"
                     if service_version:
@@ -104,7 +104,7 @@ class OutputParser:
                 findings.append(RawFinding(
                     vulnerability_type="open_port",
                     description=description,
-                    evidence=f"{host_addr}:{port_id}/{protocol} - {service_name}",
+                    evidence=f"Хост: {host_addr}, Порт: {port_id}/{protocol}, Сервис: {service_name}",
                     affected_asset_id=asset_id,
                     raw_data={
                         "tool": "nmap",
@@ -122,6 +122,99 @@ class OutputParser:
     # ------------------------------------------------------------------
     # nuclei — JSONL
     # ------------------------------------------------------------------
+
+    # Словарь переводов для nuclei шаблонов
+    NUCLEI_TRANSLATIONS = {
+        # CSP
+        "weak-csp-detect": ("Слабая политика CSP", "Обнаружена небезопасная конфигурация Content-Security-Policy с разрешёнными небезопасными директивами"),
+        "csp-header-missing": ("Отсутствует заголовок CSP", "Заголовок Content-Security-Policy не настроен, что позволяет XSS-атаки"),
+        "content-security-policy": ("Проблема CSP", "Обнаружена проблема с политикой безопасности контента"),
+        
+        # Headers
+        "missing-x-frame-options": ("Отсутствует X-Frame-Options", "Сайт уязвим к clickjacking атакам"),
+        "x-frame-options": ("Проблема X-Frame-Options", "Некорректная настройка защиты от clickjacking"),
+        "missing-hsts": ("Отсутствует HSTS", "Не настроен HTTP Strict Transport Security"),
+        "strict-transport-security": ("Проблема HSTS", "Некорректная настройка HSTS"),
+        "x-content-type-options": ("Отсутствует X-Content-Type-Options", "Возможны MIME-sniffing атаки"),
+        "x-xss-protection": ("Отсутствует X-XSS-Protection", "Не включена встроенная защита браузера от XSS"),
+        "permissions-policy": ("Отсутствует Permissions-Policy", "Не ограничены разрешения браузера"),
+        "referrer-policy": ("Отсутствует Referrer-Policy", "Возможна утечка данных через Referer"),
+        
+        # SSL/TLS
+        "ssl-issuer": ("Информация о SSL сертификате", "Получена информация об издателе сертификата"),
+        "ssl-dns-names": ("DNS имена в сертификате", "Обнаружены альтернативные имена в SSL сертификате"),
+        "expired-ssl": ("Истёкший SSL сертификат", "SSL сертификат истёк или скоро истечёт"),
+        "self-signed-ssl": ("Самоподписанный сертификат", "Используется самоподписанный SSL сертификат"),
+        "mismatched-ssl": ("Несоответствие SSL", "Имя домена не соответствует сертификату"),
+        "weak-cipher-suites": ("Слабые шифры", "Сервер поддерживает устаревшие криптографические алгоритмы"),
+        "tls-version": ("Устаревший TLS", "Поддерживаются устаревшие версии TLS"),
+        
+        # Technologies
+        "tech-detect": ("Обнаружена технология", "Определён используемый фреймворк или CMS"),
+        "waf-detect": ("Обнаружен WAF", "Определён Web Application Firewall"),
+        "wordpress-detect": ("Обнаружен WordPress", "Сайт работает на WordPress CMS"),
+        "nginx-version": ("Версия Nginx", "Раскрыта версия веб-сервера Nginx"),
+        "apache-version": ("Версия Apache", "Раскрыта версия веб-сервера Apache"),
+        "php-version": ("Версия PHP", "Раскрыта версия PHP"),
+        
+        # Exposures
+        "git-config": ("Доступен .git", "Директория .git доступна извне"),
+        "git-config-exposure": ("Утечка .git/config", "Файл конфигурации git доступен"),
+        "env-file": ("Доступен .env файл", "Файл переменных окружения доступен"),
+        "ds-store": ("Доступен .DS_Store", "Файл macOS с метаданными доступен"),
+        "backup-file": ("Найден файл бэкапа", "Обнаружен файл резервной копии"),
+        "phpinfo": ("Доступен phpinfo()", "Страница phpinfo раскрывает конфигурацию"),
+        "debug-enabled": ("Включён режим отладки", "Debug mode раскрывает внутреннюю информацию"),
+        "directory-listing": ("Листинг директорий", "Включён просмотр содержимого директорий"),
+        "robots-txt": ("Файл robots.txt", "Обнаружен файл robots.txt"),
+        "sitemap": ("Файл sitemap.xml", "Обнаружен файл карты сайта"),
+        
+        # Vulnerabilities
+        "xss": ("XSS уязвимость", "Обнаружена возможность внедрения скриптов"),
+        "sqli": ("SQL инъекция", "Обнаружена возможность SQL инъекции"),
+        "lfi": ("Local File Inclusion", "Возможно чтение локальных файлов"),
+        "rfi": ("Remote File Inclusion", "Возможно подключение удалённых файлов"),
+        "ssrf": ("SSRF уязвимость", "Возможны запросы от имени сервера"),
+        "open-redirect": ("Открытый редирект", "Возможно перенаправление на внешний сайт"),
+        "cors-misconfig": ("Неправильный CORS", "Небезопасная конфигурация CORS"),
+        "crlf-injection": ("CRLF инъекция", "Возможно внедрение заголовков"),
+        "host-header-injection": ("Host Header Injection", "Уязвимость в обработке заголовка Host"),
+        
+        # Default credentials
+        "default-login": ("Стандартные учётные данные", "Возможен вход со стандартным паролем"),
+        "admin-panel": ("Административная панель", "Обнаружена панель администратора"),
+        
+        # Info
+        "http-missing-security-headers": ("Отсутствуют заголовки безопасности", "Не настроены HTTP заголовки безопасности"),
+        "options-method": ("Метод OPTIONS", "Сервер отвечает на OPTIONS запросы"),
+        "trace-method": ("Метод TRACE включён", "Метод TRACE может использоваться для XST атак"),
+    }
+
+    def _translate_nuclei(self, template_id: str, name: str, description: str, severity: str) -> tuple[str, str]:
+        """Переводит nuclei находку на русский."""
+        # Ищем точное совпадение
+        if template_id in self.NUCLEI_TRANSLATIONS:
+            ru_name, ru_desc = self.NUCLEI_TRANSLATIONS[template_id]
+            return ru_name, ru_desc
+        
+        # Ищем частичное совпадение
+        template_lower = template_id.lower()
+        for key, (ru_name, ru_desc) in self.NUCLEI_TRANSLATIONS.items():
+            if key in template_lower or template_lower in key:
+                return ru_name, ru_desc
+        
+        # Переводим severity
+        severity_ru = {
+            "critical": "КРИТИЧЕСКИЙ",
+            "high": "ВЫСОКИЙ", 
+            "medium": "СРЕДНИЙ",
+            "low": "НИЗКИЙ",
+            "info": "ИНФО",
+            "unknown": "НЕИЗВЕСТНО",
+        }.get(severity.lower(), severity.upper())
+        
+        # Возвращаем оригинал с переведённым severity
+        return f"[{severity_ru}] {name}", description or "Обнаружено nuclei шаблоном"
 
     def parse_nuclei_json(self, json_output: str, asset_id: str) -> list[RawFinding]:
         """Парсит JSONL-вывод nuclei: template_id, severity, URL."""
@@ -141,10 +234,13 @@ class OutputParser:
             name = item.get("info", {}).get("name", item.get("name", template_id))
             description = item.get("info", {}).get("description", "")
 
+            # Переводим на русский
+            ru_name, ru_desc = self._translate_nuclei(template_id, name, description, severity)
+
             findings.append(RawFinding(
                 vulnerability_type=f"nuclei_{template_id}",
-                description=f"[{severity.upper()}] {name}: {description}" if description else f"[{severity.upper()}] {name}",
-                evidence=f"Matched at: {matched_at}",
+                description=f"{ru_name}: {ru_desc}" if ru_desc else ru_name,
+                evidence=f"Обнаружено на: {matched_at}",
                 affected_asset_id=asset_id,
                 raw_data={"tool": "nuclei", **item},
             ))
