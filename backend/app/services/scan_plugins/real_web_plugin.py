@@ -20,13 +20,40 @@ import logging
 import re
 
 from app.models.schemas import Asset, AssetType, RawFinding, ScanConfig
-from app.services.scan_plugins.base import ScanPlugin
+from app.services.scan_plugins.base import ScanPlugin, ProgressCallback
 from app.services.process_manager import ProcessManager
 from app.services.output_parser import OutputParser
 from app.services.tool_manager import ToolManager, SUPPORTED_TOOLS
 from app.models.tool_schemas import ToolStatus
 
 logger = logging.getLogger(__name__)
+
+# Human-readable tool names for progress display
+TOOL_DISPLAY_NAMES = {
+    "subfinder": "Поиск поддоменов (subfinder)",
+    "assetfinder": "Поиск поддоменов (assetfinder)",
+    "amass": "OSINT разведка (amass)",
+    "httpx": "HTTP проверка (httpx)",
+    "dnsx": "DNS анализ (dnsx)",
+    "gau": "Исторические URL (gau)",
+    "katana": "Краулинг сайта (katana)",
+    "paramspider": "Поиск параметров (paramspider)",
+    "gobuster": "Перебор директорий (gobuster)",
+    "ffuf": "Фаззинг (ffuf)",
+    "arjun": "Скрытые параметры (arjun)",
+    "wafw00f": "Детект WAF (wafw00f)",
+    "whatweb": "Технологии (whatweb)",
+    "wpscan": "WordPress сканер (wpscan)",
+    "testssl": "SSL/TLS анализ (testssl)",
+    "corsy": "CORS проверка (corsy)",
+    "nmap": "Сканирование портов (nmap)",
+    "nuclei": "Поиск уязвимостей (nuclei)",
+    "dalfox": "XSS сканер (dalfox)",
+    "sqlmap": "SQL инъекции (sqlmap)",
+    "nikto": "Веб-сканер (nikto)",
+    "trufflehog": "Поиск секретов (trufflehog)",
+    "gitleaks": "Git секреты (gitleaks)",
+}
 
 
 class RealWebPlugin(ScanPlugin):
@@ -102,7 +129,12 @@ class RealWebPlugin(ScanPlugin):
     def get_check_names(self) -> list[str]:
         return list(self.CHECK_NAMES)
 
-    def scan(self, asset: Asset, config: ScanConfig) -> list[RawFinding]:
+    def scan(
+        self, 
+        asset: Asset, 
+        config: ScanConfig,
+        progress_callback: ProgressCallback | None = None,
+    ) -> list[RawFinding]:
         """Запускает все доступные инструменты поэтапно."""
         all_findings: list[RawFinding] = []
         target = asset.target
@@ -112,106 +144,59 @@ class RealWebPlugin(ScanPlugin):
         # Extract domain from target URL
         domain = self._extract_domain(target)
         
-        # Log available tools
-        all_tools = [
-            "subfinder", "amass", "httpx", "gau", "gobuster", "ffuf", 
-            "wafw00f", "whatweb", "wpscan", "nmap", "nuclei", "dalfox", 
-            "sqlmap", "nikto", "assetfinder", "katana", "dnsx", "testssl",
-            "arjun", "paramspider", "trufflehog", "gitleaks", "corsy"
+        # Build list of available tools in order
+        tool_order = [
+            ("subfinder", lambda: self._run_subfinder(domain, asset.id)),
+            ("assetfinder", lambda: self._run_assetfinder(domain, asset.id)),
+            ("amass", lambda: self._run_amass(domain, asset.id)),
+            ("httpx", lambda: self._run_httpx(target, asset.id)),
+            ("dnsx", lambda: self._run_dnsx(domain, asset.id)),
+            ("gau", lambda: self._run_gau(domain, asset.id)),
+            ("katana", lambda: self._run_katana(target, asset.id)),
+            ("paramspider", lambda: self._run_paramspider(domain, asset.id)),
+            ("gobuster", lambda: self._run_gobuster(target, asset.id)),
+            ("ffuf", lambda: self._run_ffuf(target, asset.id)),
+            ("arjun", lambda: self._run_arjun(target, asset.id)),
+            ("wafw00f", lambda: self._run_wafw00f(target, asset.id)),
+            ("whatweb", lambda: self._run_whatweb(target, asset.id)),
+            ("wpscan", lambda: self._run_wpscan(target, asset.id)),
+            ("testssl", lambda: self._run_testssl(target, asset.id)),
+            ("corsy", lambda: self._run_corsy(target, asset.id)),
+            ("nmap", lambda: self._run_nmap(target, asset.id)),
+            ("nuclei", lambda: self._run_nuclei(target, asset.id)),
+            ("dalfox", lambda: self._run_dalfox(target, asset.id)),
+            ("sqlmap", lambda: self._run_sqlmap(target, asset.id)),
+            ("nikto", lambda: self._run_nikto(target, asset.id)),
+            ("trufflehog", lambda: self._run_trufflehog(target, asset.id)),
+            ("gitleaks", lambda: self._run_gitleaks(target, asset.id)),
         ]
-        available_tools = [t for t in all_tools if self._is_tool_available(t)]
-        logger.info("Available tools: %s", ", ".join(available_tools) if available_tools else "NONE")
-
-        # --- Разведка поддоменов ---
-        if self._is_tool_available("subfinder"):
-            logger.info("Running subfinder...")
-            all_findings.extend(self._run_subfinder(domain, asset.id))
-        if self._is_tool_available("assetfinder"):
-            logger.info("Running assetfinder...")
-            all_findings.extend(self._run_assetfinder(domain, asset.id))
-        if self._is_tool_available("amass"):
-            logger.info("Running amass...")
-            all_findings.extend(self._run_amass(domain, asset.id))
-
-        # --- HTTP проверка ---
-        if self._is_tool_available("httpx"):
-            logger.info("Running httpx...")
-            all_findings.extend(self._run_httpx(target, asset.id))
-
-        # --- DNS анализ ---
-        if self._is_tool_available("dnsx"):
-            logger.info("Running dnsx...")
-            all_findings.extend(self._run_dnsx(domain, asset.id))
-
-        # --- Сбор URL и параметров ---
-        if self._is_tool_available("gau"):
-            logger.info("Running gau...")
-            all_findings.extend(self._run_gau(domain, asset.id))
-        if self._is_tool_available("katana"):
-            logger.info("Running katana...")
-            all_findings.extend(self._run_katana(target, asset.id))
-        if self._is_tool_available("paramspider"):
-            logger.info("Running paramspider...")
-            all_findings.extend(self._run_paramspider(domain, asset.id))
-
-        # --- Перебор директорий ---
-        if self._is_tool_available("gobuster"):
-            logger.info("Running gobuster...")
-            all_findings.extend(self._run_gobuster(target, asset.id))
-        if self._is_tool_available("ffuf"):
-            logger.info("Running ffuf...")
-            all_findings.extend(self._run_ffuf(target, asset.id))
-
-        # --- Поиск скрытых параметров ---
-        if self._is_tool_available("arjun"):
-            logger.info("Running arjun...")
-            all_findings.extend(self._run_arjun(target, asset.id))
-
-        # --- WAF / Технологии ---
-        if self._is_tool_available("wafw00f"):
-            logger.info("Running wafw00f...")
-            all_findings.extend(self._run_wafw00f(target, asset.id))
-        if self._is_tool_available("whatweb"):
-            logger.info("Running whatweb...")
-            all_findings.extend(self._run_whatweb(target, asset.id))
-        if self._is_tool_available("wpscan"):
-            logger.info("Running wpscan...")
-            all_findings.extend(self._run_wpscan(target, asset.id))
-
-        # --- SSL/TLS анализ ---
-        if self._is_tool_available("testssl"):
-            logger.info("Running testssl...")
-            all_findings.extend(self._run_testssl(target, asset.id))
-
-        # --- CORS проверка ---
-        if self._is_tool_available("corsy"):
-            logger.info("Running corsy...")
-            all_findings.extend(self._run_corsy(target, asset.id))
-
-        # --- Уязвимости ---
-        if self._is_tool_available("nmap"):
-            logger.info("Running nmap...")
-            all_findings.extend(self._run_nmap(target, asset.id))
-        if self._is_tool_available("nuclei"):
-            logger.info("Running nuclei...")
-            all_findings.extend(self._run_nuclei(target, asset.id))
-        if self._is_tool_available("dalfox"):
-            logger.info("Running dalfox...")
-            all_findings.extend(self._run_dalfox(target, asset.id))
-        if self._is_tool_available("sqlmap"):
-            logger.info("Running sqlmap...")
-            all_findings.extend(self._run_sqlmap(target, asset.id))
-        if self._is_tool_available("nikto"):
-            logger.info("Running nikto...")
-            all_findings.extend(self._run_nikto(target, asset.id))
-
-        # --- Поиск секретов (если есть git репозиторий) ---
-        if self._is_tool_available("trufflehog"):
-            logger.info("Running trufflehog...")
-            all_findings.extend(self._run_trufflehog(target, asset.id))
-        if self._is_tool_available("gitleaks"):
-            logger.info("Running gitleaks...")
-            all_findings.extend(self._run_gitleaks(target, asset.id))
+        
+        # Filter to available tools only
+        available_tools = [(name, func) for name, func in tool_order if self._is_tool_available(name)]
+        total_tools = len(available_tools)
+        
+        logger.info("Available tools (%d): %s", total_tools, ", ".join(t[0] for t in available_tools))
+        
+        # Run each tool with progress updates
+        for idx, (tool_name, run_func) in enumerate(available_tools):
+            display_name = TOOL_DISPLAY_NAMES.get(tool_name, tool_name)
+            
+            # Update progress
+            if progress_callback:
+                progress_callback(display_name, idx, total_tools)
+            
+            logger.info("Running %s (%d/%d)...", tool_name, idx + 1, total_tools)
+            
+            try:
+                findings = run_func()
+                all_findings.extend(findings)
+                logger.info("%s completed: %d findings", tool_name, len(findings))
+            except Exception as e:
+                logger.error("%s failed: %s", tool_name, str(e))
+        
+        # Final progress update
+        if progress_callback:
+            progress_callback("Завершение", total_tools, total_tools)
         
         logger.info("Scan completed. Total findings: %d", len(all_findings))
         return all_findings

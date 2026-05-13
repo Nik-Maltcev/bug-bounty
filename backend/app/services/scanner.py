@@ -34,6 +34,9 @@ from app.core.exceptions import ScanError
 
 logger = logging.getLogger(__name__)
 
+# Global progress callback storage
+_progress_callbacks: dict[str, callable] = {}
+
 # Ключевые слова для классификации серьёзности
 _CRITICAL_KEYWORDS = {
     "rce", "remote code execution", "injection",
@@ -183,14 +186,26 @@ class Scanner:
 
         # Обновляем прогресс: сканирование
         progress.current_stage = "scanning"
-        progress.percent_complete = 10
+        progress.percent_complete = 5
         self._sessions[scan_id] = progress
         scan_record.current_stage = "scanning"
-        scan_record.percent_complete = 10
+        scan_record.percent_complete = 5
         db.commit()
 
+        # Создаём callback для обновления прогресса
+        def update_progress(tool_name: str, tool_index: int, total_tools: int):
+            nonlocal progress, scan_record
+            # Прогресс от 5% до 70% распределяется между инструментами
+            percent = 5 + int((tool_index / total_tools) * 65)
+            progress.current_stage = f"🔍 {tool_name}"
+            progress.percent_complete = percent
+            self._sessions[scan_id] = progress
+            scan_record.current_stage = f"🔍 {tool_name}"
+            scan_record.percent_complete = percent
+            db.commit()
+
         try:
-            raw_findings = plugin.scan(asset, scan_config)
+            raw_findings = plugin.scan(asset, scan_config, progress_callback=update_progress)
         except Exception as e:
             progress.status = ScanStatus.FAILED
             progress.current_stage = "scan_error"

@@ -5,8 +5,12 @@
 """
 
 from abc import ABC, abstractmethod
+from typing import Callable
 
 from app.models.schemas import Asset, AssetType, RawFinding, ScanConfig
+
+# Type alias for progress callback: (tool_name, tool_index, total_tools) -> None
+ProgressCallback = Callable[[str, int, int], None]
 
 
 class ScanPlugin(ABC):
@@ -23,12 +27,19 @@ class ScanPlugin(ABC):
         ...
 
     @abstractmethod
-    def scan(self, asset: Asset, config: ScanConfig) -> list[RawFinding]:
+    def scan(
+        self, 
+        asset: Asset, 
+        config: ScanConfig,
+        progress_callback: ProgressCallback | None = None,
+    ) -> list[RawFinding]:
         """Выполняет сканирование актива.
 
         Args:
             asset: актив для сканирования.
             config: конфигурация сканирования.
+            progress_callback: опциональный callback для обновления прогресса.
+                Принимает (tool_name, tool_index, total_tools).
 
         Returns:
             Список сырых находок.
