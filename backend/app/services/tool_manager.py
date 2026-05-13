@@ -128,9 +128,9 @@ SUPPORTED_TOOLS: dict[str, ToolSpec] = {
     ),
     "httpx": ToolSpec(
         name="httpx",
-        binary_name="httpx",
+        binary_name="httpx-pd",  # Renamed to avoid conflict with Python httpx
         min_version="1.3.0",
-        version_command=["httpx", "-version"],
+        version_command=["httpx-pd", "-version"],
         version_regex=r"([\d.]+)",
         install_commands={
             "go": ["go", "install", "-v", "github.com/projectdiscovery/httpx/cmd/httpx@latest"],

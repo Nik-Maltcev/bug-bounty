@@ -175,13 +175,13 @@ class RealWebPlugin(ScanPlugin):
         return self._output_parser.parse("amass", result.stdout, asset_id)
 
     # ------------------------------------------------------------------
-    # httpx
+    # httpx (using httpx-pd binary to avoid Python httpx conflict)
     # ------------------------------------------------------------------
     def _run_httpx(self, target: str, asset_id: str) -> list[RawFinding]:
-        command = ["httpx", "-u", target, "-json", "-title", "-tech-detect", "-status-code"]
+        command = ["httpx-pd", "-u", target, "-json", "-title", "-tech-detect", "-status-code"]
         result = self._process_manager.execute(command, timeout_seconds=120)
         if result.exit_code != 0 and not result.stdout.strip():
-            logger.error("httpx failed (exit=%d)", result.exit_code)
+            logger.error("httpx-pd failed (exit=%d)", result.exit_code)
             return []
         return self._output_parser.parse("httpx", result.stdout, asset_id)
 

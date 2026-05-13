@@ -1,26 +1,28 @@
 FROM python:3.12-slim
 
-# System tools + Ruby for whatweb/wpscan
+# System tools + Ruby for whatweb/wpscan + Perl modules for nikto
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    nmap curl git perl libnet-ssleay-perl \
+    nmap curl git perl libnet-ssleay-perl libjson-perl \
     ruby ruby-dev build-essential libcurl4-openssl-dev libxml2 libxml2-dev libxslt1-dev zlib1g-dev \
     unzip wget \
     && rm -rf /var/lib/apt/lists/*
 
 # nikto (from git — not in Debian Trixie repos)
+# Requires additional perl modules for full functionality
 RUN git clone --depth 1 https://github.com/sullo/nikto.git /opt/nikto \
     && ln -s /opt/nikto/program/nikto.pl /usr/local/bin/nikto \
-    && chmod +x /opt/nikto/program/nikto.pl
+    && chmod +x /opt/nikto/program/nikto.pl \
+    && perl -MCPAN -e 'install JSON' 2>/dev/null || true
 
 # nuclei (pre-built binary)
 RUN NUCLEI_VERSION=$(curl -sSL https://api.github.com/repos/projectdiscovery/nuclei/releases/latest | grep tag_name | cut -d'"' -f4 | tr -d v) \
     && curl -sSL "https://github.com/projectdiscovery/nuclei/releases/download/v${NUCLEI_VERSION}/nuclei_${NUCLEI_VERSION}_linux_amd64.zip" -o /tmp/nuclei.zip \
     && unzip -o /tmp/nuclei.zip -d /usr/local/bin/ && rm /tmp/nuclei.zip
 
-# httpx (pre-built binary)
+# httpx (pre-built binary) - renamed to httpx-pd to avoid conflict with Python httpx
 RUN HTTPX_VERSION=$(curl -sSL https://api.github.com/repos/projectdiscovery/httpx/releases/latest | grep tag_name | cut -d'"' -f4 | tr -d v) \
     && curl -sSL "https://github.com/projectdiscovery/httpx/releases/download/v${HTTPX_VERSION}/httpx_${HTTPX_VERSION}_linux_amd64.zip" -o /tmp/httpx.zip \
-    && unzip -o /tmp/httpx.zip -d /usr/local/bin/ && rm /tmp/httpx.zip
+    && unzip -o /tmp/httpx.zip -d /tmp/ && mv /tmp/httpx /usr/local/bin/httpx-pd && rm /tmp/httpx.zip
 
 # subfinder (pre-built binary)
 RUN SUBFINDER_VERSION=$(curl -sSL https://api.github.com/repos/projectdiscovery/subfinder/releases/latest | grep tag_name | cut -d'"' -f4 | tr -d v) \
@@ -30,7 +32,9 @@ RUN SUBFINDER_VERSION=$(curl -sSL https://api.github.com/repos/projectdiscovery/
 # gobuster (pre-built binary)
 RUN GOBUSTER_VERSION=$(curl -sSL https://api.github.com/repos/OJ/gobuster/releases/latest | grep tag_name | cut -d'"' -f4 | tr -d v) \
     && curl -sSL "https://github.com/OJ/gobuster/releases/download/v${GOBUSTER_VERSION}/gobuster_Linux_x86_64.tar.gz" -o /tmp/gobuster.tar.gz \
-    && tar -xzf /tmp/gobuster.tar.gz -C /usr/local/bin/ && rm /tmp/gobuster.tar.gz
+    && mkdir -p /tmp/gobuster && tar -xzf /tmp/gobuster.tar.gz -C /tmp/gobuster \
+    && find /tmp/gobuster -name "gobuster" -type f -exec mv {} /usr/local/bin/gobuster \; \
+    && chmod +x /usr/local/bin/gobuster && rm -rf /tmp/gobuster /tmp/gobuster.tar.gz
 
 # ffuf (pre-built binary)
 RUN FFUF_VERSION=$(curl -sSL https://api.github.com/repos/ffuf/ffuf/releases/latest | grep tag_name | cut -d'"' -f4 | tr -d v) \
@@ -40,7 +44,9 @@ RUN FFUF_VERSION=$(curl -sSL https://api.github.com/repos/ffuf/ffuf/releases/lat
 # gau (pre-built binary)
 RUN GAU_VERSION=$(curl -sSL https://api.github.com/repos/lc/gau/releases/latest | grep tag_name | cut -d'"' -f4 | tr -d v) \
     && curl -sSL "https://github.com/lc/gau/releases/download/v${GAU_VERSION}/gau_${GAU_VERSION}_linux_amd64.tar.gz" -o /tmp/gau.tar.gz \
-    && tar -xzf /tmp/gau.tar.gz -C /usr/local/bin/ && rm /tmp/gau.tar.gz
+    && mkdir -p /tmp/gau && tar -xzf /tmp/gau.tar.gz -C /tmp/gau \
+    && find /tmp/gau -name "gau" -type f -exec mv {} /usr/local/bin/gau \; \
+    && chmod +x /usr/local/bin/gau && rm -rf /tmp/gau /tmp/gau.tar.gz
 
 # dalfox - skip for now, can be added later via go install
 # XSS scanning will be handled by nuclei templates
