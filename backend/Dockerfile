@@ -48,12 +48,9 @@ RUN GAU_VERSION=$(curl -sSL https://api.github.com/repos/lc/gau/releases/latest 
     && find /tmp/gau -name "gau" -type f -exec mv {} /usr/local/bin/gau \; \
     && chmod +x /usr/local/bin/gau && rm -rf /tmp/gau /tmp/gau.tar.gz
 
-# dalfox - XSS scanner (uses zip format)
-RUN DALFOX_VERSION=$(curl -sSL https://api.github.com/repos/hahwul/dalfox/releases/latest | grep tag_name | cut -d'"' -f4 | tr -d v) \
-    && curl -sSL "https://github.com/hahwul/dalfox/releases/download/v${DALFOX_VERSION}/dalfox_${DALFOX_VERSION}_linux_amd64.tar.gz" -o /tmp/dalfox.tar.gz \
-    && mkdir -p /tmp/dalfox && tar -xzf /tmp/dalfox.tar.gz -C /tmp/dalfox \
-    && find /tmp/dalfox -name "dalfox" -type f -exec cp {} /usr/local/bin/dalfox \; \
-    && chmod +x /usr/local/bin/dalfox && rm -rf /tmp/dalfox /tmp/dalfox.tar.gz \
+# dalfox - XSS scanner (download binary directly)
+RUN curl -sSL "https://github.com/hahwul/dalfox/releases/latest/download/dalfox_linux_amd64" -o /usr/local/bin/dalfox \
+    && chmod +x /usr/local/bin/dalfox \
     || echo "dalfox installation skipped"
 
 # === NEW TOOLS FOR DEEP SCANNING ===
@@ -99,7 +96,7 @@ RUN git clone --depth 1 https://github.com/drwetter/testssl.sh.git /opt/testssl 
 # Python security tools (some may fail, that's ok)
 RUN pip install --no-cache-dir sqlmap wafw00f 2>/dev/null || true
 RUN pip install --no-cache-dir arjun 2>/dev/null || echo "arjun skipped"
-RUN pip install --no-cache-dir paramspider 2>/dev/null || echo "paramspider skipped"
+RUN pip install --no-cache-dir git+https://github.com/devanshbatham/ParamSpider.git 2>/dev/null || echo "paramspider skipped"
 
 # Ruby security tools (whatweb, wpscan) - optional, may fail
 RUN gem install whatweb --no-document 2>/dev/null || echo "whatweb skipped"
