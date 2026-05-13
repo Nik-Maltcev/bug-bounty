@@ -29,11 +29,11 @@ RUN SUBFINDER_VERSION=$(curl -sSL https://api.github.com/repos/projectdiscovery/
     && curl -sSL "https://github.com/projectdiscovery/subfinder/releases/download/v${SUBFINDER_VERSION}/subfinder_${SUBFINDER_VERSION}_linux_amd64.zip" -o /tmp/subfinder.zip \
     && unzip -o /tmp/subfinder.zip -d /usr/local/bin/ && rm /tmp/subfinder.zip
 
-# gobuster (pre-built binary)
+# gobuster (pre-built binary) - extract and find binary
 RUN GOBUSTER_VERSION=$(curl -sSL https://api.github.com/repos/OJ/gobuster/releases/latest | grep tag_name | cut -d'"' -f4 | tr -d v) \
     && curl -sSL "https://github.com/OJ/gobuster/releases/download/v${GOBUSTER_VERSION}/gobuster_Linux_x86_64.tar.gz" -o /tmp/gobuster.tar.gz \
     && mkdir -p /tmp/gobuster && tar -xzf /tmp/gobuster.tar.gz -C /tmp/gobuster \
-    && find /tmp/gobuster -name "gobuster" -type f -exec mv {} /usr/local/bin/gobuster \; \
+    && cp /tmp/gobuster/gobuster /usr/local/bin/gobuster 2>/dev/null || cp /tmp/gobuster/*/gobuster /usr/local/bin/gobuster 2>/dev/null || find /tmp/gobuster -type f -name "gobuster" -exec cp {} /usr/local/bin/gobuster \; \
     && chmod +x /usr/local/bin/gobuster && rm -rf /tmp/gobuster /tmp/gobuster.tar.gz
 
 # ffuf (pre-built binary)
