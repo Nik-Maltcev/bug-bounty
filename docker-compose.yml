@@ -1,26 +1,35 @@
+version: '3.8'
+
 services:
   backend:
     build: ./backend
-    container_name: bb-backend
-    restart: unless-stopped
-    environment:
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production-please}
-      - JWT_EXPIRATION_MINUTES=120
-      - DATABASE_URL=sqlite:///./data/bugbounty.db
-      - ALLOWED_ORIGINS=*
-    volumes:
-      - bb-data:/app/data
+    container_name: backend
     ports:
       - "8000:8000"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DATABASE_URL=sqlite:////data/bugbounty.db
+    volumes:
+      - bugbounty-data:/data
+    networks:
+      - bugbounty-net
+    restart: unless-stopped
 
   frontend:
     build: ./frontend
     container_name: bb-frontend
-    restart: unless-stopped
     ports:
       - "80:80"
+    networks:
+      - bugbounty-net
+    restart: unless-stopped
     depends_on:
       - backend
 
+networks:
+  bugbounty-net:
+    driver: bridge
+
 volumes:
-  bb-data:
+  bugbounty-data:
