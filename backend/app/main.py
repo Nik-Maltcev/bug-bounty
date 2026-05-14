@@ -313,6 +313,35 @@ app.include_router(ai_router)
 def on_startup():
     """Инициализация базы данных при запуске приложения."""
     init_db()
+    _ensure_admin_exists()
+
+
+def _ensure_admin_exists():
+    """Создаёт пользователя admin если его нет."""
+    import uuid
+    import bcrypt
+    from app.core.database import SessionLocal
+    from app.models.database import User
+    
+    db = SessionLocal()
+    try:
+        existing = db.query(User).filter(User.username == "admin").first()
+        if not existing:
+            hashed = bcrypt.hashpw(b"admin", bcrypt.gensalt()).decode()
+            user = User(
+                id=str(uuid.uuid4()),
+                username="admin",
+                password_hash=hashed
+            )
+            db.add(user)
+            db.commit()
+            logging.info("Default admin user created: admin/admin")
+        else:
+            logging.info("Admin user already exists")
+    except Exception as e:
+        logging.error(f"Failed to create admin user: {e}")
+    finally:
+        db.close()
 
 
 @app.get("/health")
