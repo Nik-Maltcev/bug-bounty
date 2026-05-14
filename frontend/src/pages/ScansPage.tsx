@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { quickScan, listScans, getScanProgress } from '../services/api';
+import { quickScan, listScans, getScanProgress, stopScan } from '../services/api';
 import type { ScanRecord, ScanProgress } from '../types';
 import { 
   Search, 
@@ -13,7 +13,8 @@ import {
   Loader2,
   ShieldAlert,
   RefreshCw,
-  ExternalLink
+  ExternalLink,
+  StopCircle
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -23,6 +24,7 @@ export default function ScansPage() {
   const [currentScan, setCurrentScan] = useState<(ScanProgress & { target_url?: string }) | null>(null);
   const [scans, setScans] = useState<ScanRecord[]>([]);
   const [scanning, setScanning] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -111,12 +113,33 @@ export default function ScansPage() {
     }
   };
 
+  const handleStopScan = async (scanId: string) => {
+    setStopping(true);
+    try {
+      await stopScan(scanId);
+      setScanning(false);
+      if (currentScan && currentScan.scan_id === scanId) {
+        setCurrentScan(prev => prev ? { ...prev, status: 'stopped', current_stage: 'Остановлено пользователем' } : null);
+      }
+      loadScans();
+    } catch (err: unknown) {
+      setError(
+        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 
+        'Ошибка остановки сканирования'
+      );
+    } finally {
+      setStopping(false);
+    }
+  };
+
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'completed':
         return <CheckCircle2 className="w-5 h-5 text-green-400" />;
       case 'failed':
         return <XCircle className="w-5 h-5 text-red-400" />;
+      case 'stopped':
+        return <StopCircle className="w-5 h-5 text-orange-400" />;
       case 'running':
         return <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />;
       default:
@@ -130,6 +153,7 @@ export default function ScansPage() {
       case 'running': return 'Выполняется';
       case 'completed': return 'Завершено';
       case 'failed': return 'Ошибка';
+      case 'stopped': return 'Остановлено';
       default: return status;
     }
   };
@@ -264,14 +288,31 @@ export default function ScansPage() {
               <Activity className="w-5 h-5 text-blue-500" />
               Текущее сканирование
             </h2>
-            <span className={clsx(
-              "px-3 py-1 rounded-full text-xs font-bold border",
-              currentScan.status === 'completed' ? "bg-green-500/10 text-green-400 border-green-500/20" :
-              currentScan.status === 'failed' ? "bg-red-500/10 text-red-400 border-red-500/20" :
-              "bg-blue-500/10 text-blue-400 border-blue-500/20 animate-pulse"
-            )}>
-              {getStatusLabel(currentScan.status as string)}
-            </span>
+            <div className="flex items-center gap-3">
+              {(currentScan.status === 'running' || currentScan.status === 'pending') && (
+                <button
+                  onClick={() => handleStopScan(currentScan.scan_id)}
+                  disabled={stopping}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  {stopping ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <StopCircle className="w-4 h-4" />
+                  )}
+                  Остановить
+                </button>
+              )}
+              <span className={clsx(
+                "px-3 py-1 rounded-full text-xs font-bold border",
+                currentScan.status === 'completed' ? "bg-green-500/10 text-green-400 border-green-500/20" :
+                currentScan.status === 'failed' ? "bg-red-500/10 text-red-400 border-red-500/20" :
+                currentScan.status === 'stopped' ? "bg-orange-500/10 text-orange-400 border-orange-500/20" :
+                "bg-blue-500/10 text-blue-400 border-blue-500/20 animate-pulse"
+              )}>
+                {getStatusLabel(currentScan.status as string)}
+              </span>
+            </div>
           </div>
           
           <div className="p-5 space-y-4">
@@ -325,6 +366,13 @@ export default function ScansPage() {
                 Произошла ошибка при сканировании.
               </div>
             )}
+
+            {currentScan.status === 'stopped' && (
+              <div className="flex items-center p-3 bg-orange-500/5 border border-orange-500/10 rounded-lg text-orange-400 text-sm">
+                <StopCircle className="w-5 h-5 mr-2" />
+                Сканирование остановлено пользователем.
+              </div>
+            )}
           </div>
         </section>
       )}
@@ -375,6 +423,7 @@ export default function ScansPage() {
                       "text-xs px-2 py-1 rounded-full",
                       scan.status === 'completed' ? "bg-green-500/10 text-green-400" :
                       scan.status === 'failed' ? "bg-red-500/10 text-red-400" :
+                      scan.status === 'stopped' ? "bg-orange-500/10 text-orange-400" :
                       scan.status === 'running' ? "bg-blue-500/10 text-blue-400" :
                       "bg-slate-500/10 text-slate-400"
                     )}>

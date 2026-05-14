@@ -139,6 +139,11 @@ export async function getScanProgress(scanId: string): Promise<ScanProgress> {
   return res.data;
 }
 
+export async function stopScan(scanId: string): Promise<{ status: string; message: string }> {
+  const res = await api.post<{ status: string; message: string }>(`/api/scans/${scanId}/stop`);
+  return res.data;
+}
+
 export async function getScanVulnerabilities(scanId: string): Promise<Vulnerability[]> {
   const res = await api.get<Vulnerability[]>('/api/vulnerabilities', { params: { scan_id: scanId } });
   return res.data;
