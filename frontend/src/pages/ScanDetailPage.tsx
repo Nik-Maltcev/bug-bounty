@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { getScan, getScanVulnerabilities, startAIScan, getAIStatus, stopAIScan } from '../services/api';
+import { getScan, getScanVulnerabilities, startAIScan, getAIStatus, stopAIScan, generateProfessionalReport } from '../services/api';
 import type { ScanRecord, Vulnerability } from '../types';
 import type { AIStatusResponse } from '../services/api';
 import { 
@@ -28,7 +28,10 @@ import {
   Cpu,
   Target,
   FlaskConical,
-  CheckCheck
+  CheckCheck,
+  Download,
+  X,
+  FileDown
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -130,6 +133,12 @@ export default function ScanDetailPage() {
   const [aiStatus, setAiStatus] = useState<AIStatusResponse | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
   const [expandedVulns, setExpandedVulns] = useState<Set<string>>(new Set());
+  
+  // PDF Report states
+  const [showPdfModal, setShowPdfModal] = useState(false);
+  const [pdfCompanyName, setPdfCompanyName] = useState('');
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
 
   // Polling for AI status
   const pollAIStatus = useCallback(async () => {
@@ -242,6 +251,39 @@ export default function ScanDetailPage() {
       await pollAIStatus();
     } catch (err: unknown) {
       setAiError('Ошибка остановки ИИ-анализа');
+    }
+  };
+
+  const handleDownloadPdf = async () => {
+    if (!id) return;
+    setPdfLoading(true);
+    setPdfError(null);
+    
+    try {
+      const blob = await generateProfessionalReport(id, {
+        company_name: pdfCompanyName || undefined,
+        include_executive_summary: true,
+        use_ai_descriptions: true,
+      });
+      
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `security-report-${scan?.target_name || id.slice(0, 8)}-${new Date().toISOString().split('T')[0]}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      setShowPdfModal(false);
+      setPdfCompanyName('');
+    } catch (err: unknown) {
+      const errorMsg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 
+        'Ошибка генерации PDF отчёта';
+      setPdfError(errorMsg);
+    } finally {
+      setPdfLoading(false);
     }
   };
 
@@ -591,6 +633,114 @@ export default function ScanDetailPage() {
                 {aiError}
               </p>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Professional PDF Report Button */}
+      {scan.status === 'completed' && vulns.length > 0 && (
+        <div 
+          onClick={() => setShowPdfModal(true)}
+          className="bg-gradient-to-r from-amber-900/30 to-orange-900/30 border border-amber-500/30 rounded-xl p-6 hover:from-amber-900/40 hover:to-orange-900/40 transition-all cursor-pointer"
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-amber-500/20 rounded-xl flex items-center justify-center">
+                <FileDown className="w-6 h-6 text-amber-400" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-white">Профессиональный PDF отчёт</h3>
+                <p className="text-slate-400 text-sm">Отчёт с графиками и AI-рекомендациями для клиента</p>
+              </div>
+            </div>
+            <Download className="w-6 h-6 text-amber-400" />
+          </div>
+        </div>
+      )}
+
+      {/* PDF Report Modal */}
+      {showPdfModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-md mx-4">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                <FileDown className="w-6 h-6 text-amber-400" />
+                Генерация PDF отчёта
+              </h3>
+              <button 
+                onClick={() => { setShowPdfModal(false); setPdfError(null); }}
+                className="p-2 hover:bg-slate-800 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 text-slate-400" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm text-slate-400 mb-2">
+                  Название компании (опционально)
+                </label>
+                <input
+                  type="text"
+                  value={pdfCompanyName}
+                  onChange={(e) => setPdfCompanyName(e.target.value)}
+                  placeholder="Например: ООО Рога и Копыта"
+                  className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+              
+              <div className="bg-slate-800/50 rounded-xl p-4 space-y-2">
+                <p className="text-sm text-slate-300">Отчёт будет содержать:</p>
+                <ul className="text-sm text-slate-400 space-y-1">
+                  <li className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-green-400" />
+                    Executive Summary (AI-генерация)
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-green-400" />
+                    Графики распределения уязвимостей
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-green-400" />
+                    Детальное описание каждой уязвимости
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-green-400" />
+                    Рекомендации по устранению
+                  </li>
+                </ul>
+              </div>
+              
+              {pdfError && (
+                <p className="text-sm text-red-400 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4" />
+                  {pdfError}
+                </p>
+              )}
+              
+              <button
+                onClick={handleDownloadPdf}
+                disabled={pdfLoading}
+                className={clsx(
+                  "w-full py-3 rounded-xl font-medium transition-all flex items-center justify-center gap-2",
+                  pdfLoading 
+                    ? "bg-slate-700 text-slate-400 cursor-not-allowed"
+                    : "bg-amber-600 text-white hover:bg-amber-500 shadow-lg shadow-amber-500/25"
+                )}
+              >
+                {pdfLoading ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    Генерация отчёта...
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-5 h-5" />
+                    Скачать PDF отчёт
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

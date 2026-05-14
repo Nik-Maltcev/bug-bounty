@@ -767,3 +767,64 @@ def stop_ai_analysis(
         "message": "ИИ-анализ остановлен",
         "scan_id": scan_id,
     }
+
+
+class ProfessionalReportRequest(BaseModel):
+    """Запрос на генерацию профессионального отчёта."""
+    company_name: str = "Клиент"
+    include_executive_summary: bool = True
+    use_ai_descriptions: bool = True
+
+
+@router.post("/api/scans/{scan_id}/professional-report")
+def generate_professional_report(
+    scan_id: str,
+    body: ProfessionalReportRequest | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Генерирует профессиональный PDF-отчёт с графиками.
+    
+    Использует DeepSeek для генерации Executive Summary и рекомендаций.
+    Возвращает PDF-файл.
+    """
+    from fastapi.responses import Response
+    from app.services.professional_report import ProfessionalReportGenerator
+    
+    if body is None:
+        body = ProfessionalReportRequest()
+    
+    scan = db.query(Scan).filter(Scan.id == scan_id).first()
+    if scan is None:
+        raise HTTPException(status_code=404, detail="Сканирование не найдено")
+    
+    if scan.status != "completed":
+        raise HTTPException(status_code=400, detail="Сканирование должно быть завершено для генерации отчёта")
+    
+    try:
+        generator = ProfessionalReportGenerator(db)
+        pdf_bytes = generator.generate_report(
+            scan_id=scan_id,
+            company_name=body.company_name,
+            include_executive_summary=body.include_executive_summary,
+            use_ai_descriptions=body.use_ai_descriptions,
+        )
+        
+        # Формируем имя файла
+        asset = db.query(AssetDB).filter(AssetDB.id == scan.asset_id).first()
+        target_name = asset.name if asset else "scan"
+        filename = f"security_report_{target_name}_{scan_id[:8]}.pdf"
+        
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            }
+        )
+        
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.exception("Failed to generate professional report: %s", e)
+        raise HTTPException(status_code=500, detail=f"Ошибка генерации отчёта: {str(e)}")

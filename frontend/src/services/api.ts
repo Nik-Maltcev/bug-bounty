@@ -207,6 +207,22 @@ export async function stopAIScan(scanId: string): Promise<{ status: string; mess
   return res.data;
 }
 
+export interface ProfessionalReportRequest {
+  company_name?: string;
+  include_executive_summary?: boolean;
+  use_ai_descriptions?: boolean;
+}
+
+export async function generateProfessionalReport(
+  scanId: string, 
+  options?: ProfessionalReportRequest
+): Promise<Blob> {
+  const res = await api.post(`/api/scans/${scanId}/professional-report`, options || {}, {
+    responseType: 'blob',
+  });
+  return res.data as Blob;
+}
+
 export interface SummaryReportVuln {
   id: string;
   type: string;
