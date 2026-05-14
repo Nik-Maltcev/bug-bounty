@@ -38,6 +38,9 @@ logger = logging.getLogger(__name__)
 # Global progress callback storage
 _progress_callbacks: dict[str, callable] = {}
 
+# Global stop flags for scans
+_stop_flags: dict[str, bool] = {}
+
 # Ключевые слова для классификации серьёзности
 _CRITICAL_KEYWORDS = {
     "rce", "remote code execution", "injection",
@@ -75,6 +78,43 @@ class Scanner:
         }
         self._audit_logger = AuditLogger()
         self._orchestrator = ScanOrchestrator()
+
+    def stop_scan(self, scan_id: str, db: Session) -> bool:
+        """Останавливает сканирование.
+        
+        Args:
+            scan_id: ID сканирования для остановки.
+            db: сессия SQLAlchemy.
+            
+        Returns:
+            True если сканирование было остановлено, False если не найдено.
+        """
+        global _stop_flags
+        
+        # Устанавливаем флаг остановки
+        _stop_flags[scan_id] = True
+        
+        # Обновляем статус в сессии
+        if scan_id in self._sessions:
+            self._sessions[scan_id].status = ScanStatus.FAILED
+            self._sessions[scan_id].current_stage = "stopped_by_user"
+        
+        # Обновляем статус в БД
+        scan_record = db.query(Scan).filter(Scan.id == scan_id).first()
+        if scan_record:
+            scan_record.status = "stopped"
+            scan_record.current_stage = "stopped_by_user"
+            scan_record.completed_at = datetime.now(UTC)
+            db.commit()
+            logger.info("Scan %s stopped by user", scan_id)
+            return True
+        
+        return False
+
+    def is_scan_stopped(self, scan_id: str) -> bool:
+        """Проверяет, остановлено ли сканирование."""
+        global _stop_flags
+        return _stop_flags.get(scan_id, False)
 
     def get_plugin_for_asset(self, asset_type: AssetType) -> ScanPlugin | None:
         """Возвращает плагин для указанного типа актива."""
@@ -196,6 +236,12 @@ class Scanner:
         # Создаём callback для обновления прогресса
         def update_progress(tool_name: str, tool_index: int, total_tools: int):
             nonlocal progress, scan_record
+            
+            # Проверяем флаг остановки
+            if self.is_scan_stopped(scan_id):
+                logger.info("Scan %s stop flag detected, raising exception", scan_id)
+                raise ScanError(scan_id, "stopped", "Сканирование остановлено пользователем")
+            
             # Прогресс от 5% до 70% распределяется между инструментами
             percent = 5 + int((tool_index / total_tools) * 65)
             progress.current_stage = f"🔍 {tool_name}"
@@ -204,6 +250,7 @@ class Scanner:
             scan_record.current_stage = f"🔍 {tool_name}"
             scan_record.percent_complete = percent
             db.commit()
+            logger.info("Scan %s: %s (%d/%d) - %d%%", scan_id, tool_name, tool_index + 1, total_tools, percent)
 
         try:
             raw_findings = plugin.scan(asset, scan_config, progress_callback=update_progress)

@@ -285,6 +285,36 @@ def get_scan_progress(
     }
 
 
+@router.post("/api/scans/{scan_id}/stop")
+def stop_scan(
+    scan_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Остановить сканирование (Stage 1).
+    
+    Немедленно останавливает текущее сканирование.
+    """
+    scan = db.query(Scan).filter(Scan.id == scan_id).first()
+    if scan is None:
+        raise HTTPException(status_code=404, detail="Сканирование не найдено")
+    
+    if scan.status not in ("running", "pending"):
+        raise HTTPException(status_code=400, detail=f"Сканирование не запущено (статус: {scan.status})")
+    
+    # Останавливаем сканирование
+    stopped = _scanner.stop_scan(scan_id, db)
+    
+    if stopped:
+        return {
+            "status": "stopped",
+            "message": "Сканирование остановлено",
+            "scan_id": scan_id,
+        }
+    else:
+        raise HTTPException(status_code=500, detail="Не удалось остановить сканирование")
+
+
 @router.get("/api/programs/{program_id}/assets")
 def list_program_assets(
     program_id: str,
