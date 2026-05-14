@@ -348,6 +348,102 @@ SUPPORTED_TOOLS: dict[str, ToolSpec] = {
         default_args=["-o", "json"],
         output_format="json",
     ),
+    # === CMS SCANNERS ===
+    "joomscan": ToolSpec(
+        name="joomscan",
+        binary_name="joomscan",
+        min_version="0.0.7",
+        version_command=["joomscan", "--version"],
+        version_regex=r"([\d.]+)",
+        install_commands={
+            "git": ["git", "clone", "https://github.com/OWASP/joomscan.git"],
+        },
+        asset_types=[AssetType.WEB_APPLICATION],
+        default_args=["--ec"],
+        output_format="text",
+    ),
+    "droopescan": ToolSpec(
+        name="droopescan",
+        binary_name="droopescan",
+        min_version="1.0.0",
+        version_command=["droopescan", "--version"],
+        version_regex=r"([\d.]+)",
+        install_commands={
+            "pip": ["pip", "install", "droopescan"],
+        },
+        asset_types=[AssetType.WEB_APPLICATION],
+        default_args=["scan", "-o", "json"],
+        output_format="json",
+    ),
+    # === INJECTION TOOLS ===
+    "commix": ToolSpec(
+        name="commix",
+        binary_name="commix",
+        min_version="3.0.0",
+        version_command=["commix", "--version"],
+        version_regex=r"([\d.]+)",
+        install_commands={
+            "pip": ["pip", "install", "commix"],
+        },
+        asset_types=[AssetType.WEB_APPLICATION],
+        default_args=["--batch", "--output-dir=/tmp"],
+        output_format="text",
+    ),
+    "tplmap": ToolSpec(
+        name="tplmap",
+        binary_name="tplmap",
+        min_version="0.5.0",
+        version_command=["tplmap", "--help"],
+        version_regex=r"tplmap",
+        install_commands={
+            "git": ["git", "clone", "https://github.com/epinna/tplmap.git"],
+        },
+        asset_types=[AssetType.WEB_APPLICATION],
+        default_args=["--level", "1"],
+        output_format="text",
+    ),
+    # === JWT & AUTH TOOLS ===
+    "jwt_tool": ToolSpec(
+        name="jwt_tool",
+        binary_name="jwt_tool",
+        min_version="2.0.0",
+        version_command=["jwt_tool", "--help"],
+        version_regex=r"jwt_tool",
+        install_commands={
+            "git": ["git", "clone", "https://github.com/ticarpi/jwt_tool.git"],
+        },
+        asset_types=[AssetType.WEB_APPLICATION],
+        default_args=["-M", "at"],
+        output_format="text",
+    ),
+    # === HTTP SMUGGLING ===
+    "smuggler": ToolSpec(
+        name="smuggler",
+        binary_name="smuggler",
+        min_version="1.0.0",
+        version_command=["smuggler", "--help"],
+        version_regex=r"smuggler",
+        install_commands={
+            "git": ["git", "clone", "https://github.com/defparam/smuggler.git"],
+        },
+        asset_types=[AssetType.WEB_APPLICATION],
+        default_args=["-q"],
+        output_format="text",
+    ),
+    # === CORS SCANNER ===
+    "corscanner": ToolSpec(
+        name="corscanner",
+        binary_name="corscanner",
+        min_version="1.0.0",
+        version_command=["corscanner", "--help"],
+        version_regex=r"cors",
+        install_commands={
+            "git": ["git", "clone", "https://github.com/chenjj/CORScanner.git"],
+        },
+        asset_types=[AssetType.WEB_APPLICATION],
+        default_args=["-v"],
+        output_format="text",
+    ),
 }
 
 

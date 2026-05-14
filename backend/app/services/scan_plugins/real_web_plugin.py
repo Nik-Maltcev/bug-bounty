@@ -44,13 +44,20 @@ TOOL_DISPLAY_NAMES = {
     "wafw00f": "Детект WAF (wafw00f)",
     "whatweb": "Технологии (whatweb)",
     "wpscan": "WordPress сканер (wpscan)",
+    "joomscan": "Joomla сканер (joomscan)",
+    "droopescan": "CMS сканер (droopescan)",
     "testssl": "SSL/TLS анализ (testssl)",
     "corsy": "CORS проверка (corsy)",
+    "corscanner": "CORS сканер (CORScanner)",
     "nmap": "Сканирование портов (nmap)",
     "nuclei": "Поиск уязвимостей (nuclei)",
     "dalfox": "XSS сканер (dalfox)",
     "sqlmap": "SQL инъекции (sqlmap)",
+    "commix": "Command Injection (commix)",
+    "tplmap": "SSTI сканер (tplmap)",
     "nikto": "Веб-сканер (nikto)",
+    "smuggler": "HTTP Smuggling (smuggler)",
+    "jwt_tool": "JWT анализ (jwt_tool)",
     "trufflehog": "Поиск секретов (trufflehog)",
     "gitleaks": "Git секреты (gitleaks)",
 }
@@ -84,6 +91,18 @@ class RealWebPlugin(ScanPlugin):
         "trufflehog_secrets",
         "gitleaks_secrets",
         "corsy_cors",
+        # CMS scanners
+        "joomscan_cms",
+        "droopescan_cms",
+        # Injection tools
+        "commix_injection",
+        "tplmap_ssti",
+        # JWT & Auth
+        "jwt_analysis",
+        # HTTP Smuggling
+        "smuggler_http",
+        # CORS
+        "corscanner_cors",
     ]
 
     _TOOL_CHECK_MAP = {
@@ -111,6 +130,18 @@ class RealWebPlugin(ScanPlugin):
         "trufflehog": "trufflehog_secrets",
         "gitleaks": "gitleaks_secrets",
         "corsy": "corsy_cors",
+        # CMS scanners
+        "joomscan": "joomscan_cms",
+        "droopescan": "droopescan_cms",
+        # Injection tools
+        "commix": "commix_injection",
+        "tplmap": "tplmap_ssti",
+        # JWT & Auth
+        "jwt_tool": "jwt_analysis",
+        # HTTP Smuggling
+        "smuggler": "smuggler_http",
+        # CORS
+        "corscanner": "corscanner_cors",
     }
 
     def __init__(
@@ -160,13 +191,20 @@ class RealWebPlugin(ScanPlugin):
             ("wafw00f", lambda: self._run_wafw00f(target, asset.id)),
             ("whatweb", lambda: self._run_whatweb(target, asset.id)),
             ("wpscan", lambda: self._run_wpscan(target, asset.id)),
+            ("joomscan", lambda: self._run_joomscan(target, asset.id)),
+            ("droopescan", lambda: self._run_droopescan(target, asset.id)),
             ("testssl", lambda: self._run_testssl(target, asset.id)),
             ("corsy", lambda: self._run_corsy(target, asset.id)),
+            ("corscanner", lambda: self._run_corscanner(target, asset.id)),
             ("nmap", lambda: self._run_nmap(target, asset.id)),
             ("nuclei", lambda: self._run_nuclei(target, asset.id)),
             ("dalfox", lambda: self._run_dalfox(target, asset.id)),
             ("sqlmap", lambda: self._run_sqlmap(target, asset.id)),
+            ("commix", lambda: self._run_commix(target, asset.id)),
+            ("tplmap", lambda: self._run_tplmap(target, asset.id)),
             ("nikto", lambda: self._run_nikto(target, asset.id)),
+            ("smuggler", lambda: self._run_smuggler(target, asset.id)),
+            ("jwt_tool", lambda: self._run_jwt_tool(target, asset.id)),
             ("trufflehog", lambda: self._run_trufflehog(target, asset.id)),
             ("gitleaks", lambda: self._run_gitleaks(target, asset.id)),
         ]
@@ -481,3 +519,101 @@ class RealWebPlugin(ScanPlugin):
             logger.error("corsy failed (exit=%d)", result.exit_code)
             return []
         return self._output_parser.parse("corsy", result.stdout, asset_id)
+
+    # ==================================================================
+    # CMS SCANNERS
+    # ==================================================================
+
+    # ------------------------------------------------------------------
+    # joomscan - Joomla vulnerability scanner
+    # ------------------------------------------------------------------
+    def _run_joomscan(self, target: str, asset_id: str) -> list[RawFinding]:
+        command = ["perl", "/opt/joomscan/joomscan.pl", "-u", target, "--ec"]
+        result = self._process_manager.execute(command, timeout_seconds=600)
+        if result.exit_code != 0 and not result.stdout.strip():
+            logger.error("joomscan failed (exit=%d)", result.exit_code)
+            return []
+        return self._output_parser.parse("joomscan", result.stdout, asset_id)
+
+    # ------------------------------------------------------------------
+    # droopescan - CMS vulnerability scanner (Drupal, Joomla, etc.)
+    # ------------------------------------------------------------------
+    def _run_droopescan(self, target: str, asset_id: str) -> list[RawFinding]:
+        command = ["droopescan", "scan", "-u", target, "-o", "json"]
+        result = self._process_manager.execute(command, timeout_seconds=600)
+        if result.exit_code != 0 and not result.stdout.strip():
+            logger.error("droopescan failed (exit=%d)", result.exit_code)
+            return []
+        return self._output_parser.parse("droopescan", result.stdout, asset_id)
+
+    # ==================================================================
+    # INJECTION TOOLS
+    # ==================================================================
+
+    # ------------------------------------------------------------------
+    # commix - Command injection scanner
+    # ------------------------------------------------------------------
+    def _run_commix(self, target: str, asset_id: str) -> list[RawFinding]:
+        command = ["commix", "-u", target, "--batch", "--output-dir=/tmp/commix"]
+        result = self._process_manager.execute(command, timeout_seconds=600)
+        if result.exit_code != 0 and not result.stdout.strip():
+            logger.error("commix failed (exit=%d)", result.exit_code)
+            return []
+        return self._output_parser.parse("commix", result.stdout, asset_id)
+
+    # ------------------------------------------------------------------
+    # tplmap - Server-Side Template Injection scanner
+    # ------------------------------------------------------------------
+    def _run_tplmap(self, target: str, asset_id: str) -> list[RawFinding]:
+        command = ["python3", "/opt/tplmap/tplmap.py", "-u", target, "--level", "1"]
+        result = self._process_manager.execute(command, timeout_seconds=600)
+        if result.exit_code != 0 and not result.stdout.strip():
+            logger.error("tplmap failed (exit=%d)", result.exit_code)
+            return []
+        return self._output_parser.parse("tplmap", result.stdout, asset_id)
+
+    # ==================================================================
+    # JWT & AUTH TOOLS
+    # ==================================================================
+
+    # ------------------------------------------------------------------
+    # jwt_tool - JWT vulnerability scanner
+    # ------------------------------------------------------------------
+    def _run_jwt_tool(self, target: str, asset_id: str) -> list[RawFinding]:
+        # jwt_tool needs a JWT token, we'll try to extract from target or scan for JWT endpoints
+        command = ["python3", "/opt/jwt_tool/jwt_tool.py", "-t", target, "-M", "at", "-np"]
+        result = self._process_manager.execute(command, timeout_seconds=300)
+        if result.exit_code != 0 and not result.stdout.strip():
+            logger.error("jwt_tool failed (exit=%d)", result.exit_code)
+            return []
+        return self._output_parser.parse("jwt_tool", result.stdout, asset_id)
+
+    # ==================================================================
+    # HTTP SMUGGLING
+    # ==================================================================
+
+    # ------------------------------------------------------------------
+    # smuggler - HTTP Request Smuggling scanner
+    # ------------------------------------------------------------------
+    def _run_smuggler(self, target: str, asset_id: str) -> list[RawFinding]:
+        command = ["python3", "/opt/smuggler/smuggler.py", "-u", target, "-q"]
+        result = self._process_manager.execute(command, timeout_seconds=300)
+        if result.exit_code != 0 and not result.stdout.strip():
+            logger.error("smuggler failed (exit=%d)", result.exit_code)
+            return []
+        return self._output_parser.parse("smuggler", result.stdout, asset_id)
+
+    # ==================================================================
+    # CORS SCANNERS
+    # ==================================================================
+
+    # ------------------------------------------------------------------
+    # corscanner - CORS misconfiguration scanner (alternative)
+    # ------------------------------------------------------------------
+    def _run_corscanner(self, target: str, asset_id: str) -> list[RawFinding]:
+        command = ["python3", "/opt/corscanner/cors_scan.py", "-u", target]
+        result = self._process_manager.execute(command, timeout_seconds=120)
+        if result.exit_code != 0 and not result.stdout.strip():
+            logger.error("corscanner failed (exit=%d)", result.exit_code)
+            return []
+        return self._output_parser.parse("corscanner", result.stdout, asset_id)

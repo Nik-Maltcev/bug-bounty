@@ -54,8 +54,8 @@ logger = logging.getLogger(__name__)
 class AIScanner:
     """AI-управляемый сканер второго этапа."""
 
-    DEFAULT_MAX_ITERATIONS = 3
-    DEFAULT_MAX_REQUESTS = 50
+    DEFAULT_MAX_ITERATIONS = 7
+    DEFAULT_MAX_REQUESTS = 100
     DEFAULT_RATE_LIMIT = 5.0
 
     def __init__(

@@ -102,6 +102,55 @@ RUN pip install --no-cache-dir git+https://github.com/devanshbatham/ParamSpider.
 RUN gem install whatweb --no-document 2>/dev/null || echo "whatweb skipped"
 RUN gem install wpscan --no-document 2>/dev/null || echo "wpscan skipped"
 
+# === CMS SCANNERS ===
+
+# joomscan - Joomla scanner (Perl)
+RUN git clone --depth 1 https://github.com/OWASP/joomscan.git /opt/joomscan \
+    && ln -s /opt/joomscan/joomscan.pl /usr/local/bin/joomscan \
+    && chmod +x /opt/joomscan/joomscan.pl \
+    || echo "joomscan installation skipped"
+
+# droopescan - Drupal/SilverStripe/WordPress scanner
+RUN pip install --no-cache-dir droopescan 2>/dev/null || echo "droopescan skipped"
+
+# === INJECTION TOOLS ===
+
+# commix - command injection exploiter
+RUN pip install --no-cache-dir commix 2>/dev/null || echo "commix skipped"
+
+# tplmap - SSTI scanner
+RUN git clone --depth 1 https://github.com/epinna/tplmap.git /opt/tplmap \
+    && pip install --no-cache-dir -r /opt/tplmap/requirements.txt 2>/dev/null || true \
+    && ln -s /opt/tplmap/tplmap.py /usr/local/bin/tplmap \
+    && chmod +x /opt/tplmap/tplmap.py \
+    || echo "tplmap installation skipped"
+
+# === JWT & AUTH TOOLS ===
+
+# jwt_tool - JWT analyzer
+RUN git clone --depth 1 https://github.com/ticarpi/jwt_tool.git /opt/jwt_tool \
+    && pip install --no-cache-dir -r /opt/jwt_tool/requirements.txt 2>/dev/null || true \
+    && ln -s /opt/jwt_tool/jwt_tool.py /usr/local/bin/jwt_tool \
+    && chmod +x /opt/jwt_tool/jwt_tool.py \
+    || echo "jwt_tool installation skipped"
+
+# === HTTP SMUGGLING ===
+
+# smuggler - HTTP request smuggling detector
+RUN git clone --depth 1 https://github.com/defparam/smuggler.git /opt/smuggler \
+    && ln -s /opt/smuggler/smuggler.py /usr/local/bin/smuggler \
+    && chmod +x /opt/smuggler/smuggler.py \
+    || echo "smuggler installation skipped"
+
+# === CORS SCANNER ===
+
+# CORScanner - CORS misconfiguration scanner
+RUN git clone --depth 1 https://github.com/chenjj/CORScanner.git /opt/corscanner \
+    && pip install --no-cache-dir -r /opt/corscanner/requirements.txt 2>/dev/null || true \
+    && ln -s /opt/corscanner/cors_scan.py /usr/local/bin/corscanner \
+    && chmod +x /opt/corscanner/cors_scan.py \
+    || echo "corscanner installation skipped"
+
 # Create wordlist directory with multiple wordlists
 RUN mkdir -p /usr/share/wordlists \
     && curl -sSL https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt -o /usr/share/wordlists/common.txt \

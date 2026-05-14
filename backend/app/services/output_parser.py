@@ -43,6 +43,18 @@ _TOOL_PARSERS: dict[str, str] = {
     "trufflehog": "parse_trufflehog_json",
     "gitleaks": "parse_gitleaks_json",
     "corsy": "parse_corsy_json",
+    # CMS scanners
+    "joomscan": "parse_joomscan_text",
+    "droopescan": "parse_droopescan_json",
+    # Injection tools
+    "commix": "parse_commix_text",
+    "tplmap": "parse_tplmap_text",
+    # JWT & Auth
+    "jwt_tool": "parse_jwt_tool_text",
+    # HTTP Smuggling
+    "smuggler": "parse_smuggler_text",
+    # CORS
+    "corscanner": "parse_corscanner_json",
 }
 
 
@@ -1042,4 +1054,381 @@ class OutputParser:
                 affected_asset_id=asset_id,
                 raw_data={"tool": "corsy", **item},
             ))
+        return findings
+
+    # ==================================================================
+    # CMS SCANNERS PARSERS
+    # ==================================================================
+
+    # ------------------------------------------------------------------
+    # joomscan — text (Joomla vulnerabilities)
+    # ------------------------------------------------------------------
+
+    def parse_joomscan_text(self, text_output: str, asset_id: str) -> list[RawFinding]:
+        findings: list[RawFinding] = []
+        
+        # Parse Joomla version
+        version_match = re.search(r"Joomla\s+(\d+\.\d+(?:\.\d+)?)", text_output, re.IGNORECASE)
+        if version_match:
+            version = version_match.group(1)
+            findings.append(RawFinding(
+                vulnerability_type="cms_version",
+                description=f"Обнаружена версия Joomla: {version}",
+                evidence=f"Версия: {version}",
+                affected_asset_id=asset_id,
+                raw_data={"tool": "joomscan", "cms": "joomla", "version": version},
+            ))
+        
+        # Parse vulnerabilities
+        vuln_pattern = re.compile(r"\[!\]\s*(.+?)(?:\n|$)", re.MULTILINE)
+        for match in vuln_pattern.finditer(text_output):
+            vuln_text = match.group(1).strip()
+            if vuln_text and "vulnerability" in vuln_text.lower():
+                findings.append(RawFinding(
+                    vulnerability_type="joomla_vulnerability",
+                    description=f"Joomla уязвимость: {vuln_text}",
+                    evidence=vuln_text,
+                    affected_asset_id=asset_id,
+                    raw_data={"tool": "joomscan", "finding": vuln_text},
+                ))
+        
+        # Parse exposed directories/files
+        exposed_pattern = re.compile(r"(?:admin|backup|config|debug|install|tmp|log)[^\s]*", re.IGNORECASE)
+        for match in exposed_pattern.finditer(text_output):
+            path = match.group(0)
+            findings.append(RawFinding(
+                vulnerability_type="exposed_path",
+                description=f"Обнаружен путь Joomla: {path}",
+                evidence=f"Путь: {path}",
+                affected_asset_id=asset_id,
+                raw_data={"tool": "joomscan", "path": path},
+            ))
+        
+        return findings
+
+    # ------------------------------------------------------------------
+    # droopescan — JSON (CMS vulnerabilities)
+    # ------------------------------------------------------------------
+
+    def parse_droopescan_json(self, json_output: str, asset_id: str) -> list[RawFinding]:
+        findings: list[RawFinding] = []
+        try:
+            data = json.loads(json_output)
+        except json.JSONDecodeError:
+            # Fallback to text parsing
+            return self._parse_droopescan_text(json_output, asset_id)
+
+        cms_type = data.get("cms", "unknown")
+        version = data.get("version", {})
+        plugins = data.get("plugins", {})
+        themes = data.get("themes", {})
+        interesting = data.get("interesting_urls", [])
+        
+        # Version info
+        if version:
+            ver_str = version.get("version", "unknown")
+            findings.append(RawFinding(
+                vulnerability_type="cms_version",
+                description=f"Обнаружена версия {cms_type}: {ver_str}",
+                evidence=f"CMS: {cms_type}, Версия: {ver_str}",
+                affected_asset_id=asset_id,
+                raw_data={"tool": "droopescan", "cms": cms_type, "version": ver_str},
+            ))
+        
+        # Plugins
+        if plugins:
+            for plugin_name, plugin_data in plugins.items():
+                findings.append(RawFinding(
+                    vulnerability_type="cms_plugin",
+                    description=f"Обнаружен плагин {cms_type}: {plugin_name}",
+                    evidence=f"Плагин: {plugin_name}",
+                    affected_asset_id=asset_id,
+                    raw_data={"tool": "droopescan", "plugin": plugin_name, "data": plugin_data},
+                ))
+        
+        # Interesting URLs
+        for url_info in interesting:
+            url = url_info if isinstance(url_info, str) else url_info.get("url", "")
+            if url:
+                findings.append(RawFinding(
+                    vulnerability_type="interesting_url",
+                    description=f"Интересный URL {cms_type}: {url}",
+                    evidence=f"URL: {url}",
+                    affected_asset_id=asset_id,
+                    raw_data={"tool": "droopescan", "url": url},
+                ))
+        
+        return findings
+
+    def _parse_droopescan_text(self, text_output: str, asset_id: str) -> list[RawFinding]:
+        """Fallback parser for droopescan text output."""
+        findings: list[RawFinding] = []
+        for line in text_output.strip().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                findings.append(RawFinding(
+                    vulnerability_type="cms_finding",
+                    description=f"Droopescan: {line}",
+                    evidence=line,
+                    affected_asset_id=asset_id,
+                    raw_data={"tool": "droopescan", "raw_line": line},
+                ))
+        return findings
+
+    # ==================================================================
+    # INJECTION TOOLS PARSERS
+    # ==================================================================
+
+    # ------------------------------------------------------------------
+    # commix — text (Command injection)
+    # ------------------------------------------------------------------
+
+    def parse_commix_text(self, text_output: str, asset_id: str) -> list[RawFinding]:
+        findings: list[RawFinding] = []
+        
+        # Parse vulnerable parameters
+        vuln_pattern = re.compile(
+            r"(?:parameter|param)\s*['\"]?(\w+)['\"]?\s*(?:is|appears to be)\s*(?:vulnerable|injectable)",
+            re.IGNORECASE
+        )
+        for match in vuln_pattern.finditer(text_output):
+            param = match.group(1)
+            findings.append(RawFinding(
+                vulnerability_type="command_injection",
+                description=f"Command Injection в параметре: {param}",
+                evidence=f"Параметр: {param}",
+                affected_asset_id=asset_id,
+                raw_data={"tool": "commix", "parameter": param},
+            ))
+        
+        # Parse injection techniques
+        technique_pattern = re.compile(
+            r"(?:classic|eval-based|time-based|file-based)\s+(?:command\s+)?injection",
+            re.IGNORECASE
+        )
+        for match in technique_pattern.finditer(text_output):
+            technique = match.group(0)
+            findings.append(RawFinding(
+                vulnerability_type="command_injection",
+                description=f"Обнаружена техника: {technique}",
+                evidence=technique,
+                affected_asset_id=asset_id,
+                raw_data={"tool": "commix", "technique": technique},
+            ))
+        
+        # Generic vulnerable detection
+        if re.search(r"vulnerable|injection\s+point", text_output, re.IGNORECASE) and not findings:
+            findings.append(RawFinding(
+                vulnerability_type="command_injection",
+                description="Потенциальная Command Injection обнаружена",
+                evidence=text_output[:500],
+                affected_asset_id=asset_id,
+                raw_data={"tool": "commix", "raw_output": text_output[:2000]},
+            ))
+        
+        return findings
+
+    # ------------------------------------------------------------------
+    # tplmap — text (SSTI)
+    # ------------------------------------------------------------------
+
+    def parse_tplmap_text(self, text_output: str, asset_id: str) -> list[RawFinding]:
+        findings: list[RawFinding] = []
+        
+        # Parse template engine detection
+        engine_pattern = re.compile(
+            r"(?:Smarty|Mako|Jinja2|Twig|Freemarker|Velocity|Jade|Pug|ERB|Slim|Haml|Dust)\s*(?:confirmed|detected|identified)",
+            re.IGNORECASE
+        )
+        for match in engine_pattern.finditer(text_output):
+            engine = match.group(0)
+            findings.append(RawFinding(
+                vulnerability_type="ssti",
+                description=f"SSTI: {engine}",
+                evidence=engine,
+                affected_asset_id=asset_id,
+                raw_data={"tool": "tplmap", "engine": engine},
+            ))
+        
+        # Parse vulnerable parameters
+        param_pattern = re.compile(
+            r"(?:parameter|param)\s*['\"]?(\w+)['\"]?\s*(?:is|appears)\s*(?:vulnerable|injectable)",
+            re.IGNORECASE
+        )
+        for match in param_pattern.finditer(text_output):
+            param = match.group(1)
+            findings.append(RawFinding(
+                vulnerability_type="ssti",
+                description=f"SSTI в параметре: {param}",
+                evidence=f"Параметр: {param}",
+                affected_asset_id=asset_id,
+                raw_data={"tool": "tplmap", "parameter": param},
+            ))
+        
+        # Generic SSTI detection
+        if re.search(r"server.side\s+template\s+injection|ssti", text_output, re.IGNORECASE) and not findings:
+            findings.append(RawFinding(
+                vulnerability_type="ssti",
+                description="Потенциальная SSTI уязвимость обнаружена",
+                evidence=text_output[:500],
+                affected_asset_id=asset_id,
+                raw_data={"tool": "tplmap", "raw_output": text_output[:2000]},
+            ))
+        
+        return findings
+
+    # ==================================================================
+    # JWT & AUTH PARSERS
+    # ==================================================================
+
+    # ------------------------------------------------------------------
+    # jwt_tool — text (JWT vulnerabilities)
+    # ------------------------------------------------------------------
+
+    def parse_jwt_tool_text(self, text_output: str, asset_id: str) -> list[RawFinding]:
+        findings: list[RawFinding] = []
+        
+        # Parse algorithm vulnerabilities
+        alg_pattern = re.compile(
+            r"(?:alg|algorithm)\s*[:\s]+['\"]?(none|HS256|RS256|ES256)['\"]?\s*(?:accepted|vulnerable|weak)",
+            re.IGNORECASE
+        )
+        for match in alg_pattern.finditer(text_output):
+            alg = match.group(1)
+            findings.append(RawFinding(
+                vulnerability_type="jwt_vulnerability",
+                description=f"JWT уязвимость алгоритма: {alg}",
+                evidence=f"Алгоритм: {alg}",
+                affected_asset_id=asset_id,
+                raw_data={"tool": "jwt_tool", "algorithm": alg},
+            ))
+        
+        # Parse signature bypass
+        if re.search(r"signature\s*(?:bypass|not\s+verified|ignored)", text_output, re.IGNORECASE):
+            findings.append(RawFinding(
+                vulnerability_type="jwt_vulnerability",
+                description="JWT: Обход проверки подписи",
+                evidence="Signature bypass detected",
+                affected_asset_id=asset_id,
+                raw_data={"tool": "jwt_tool", "issue": "signature_bypass"},
+            ))
+        
+        # Parse key confusion
+        if re.search(r"key\s*confusion|algorithm\s*confusion", text_output, re.IGNORECASE):
+            findings.append(RawFinding(
+                vulnerability_type="jwt_vulnerability",
+                description="JWT: Algorithm Confusion Attack",
+                evidence="Key/Algorithm confusion detected",
+                affected_asset_id=asset_id,
+                raw_data={"tool": "jwt_tool", "issue": "algorithm_confusion"},
+            ))
+        
+        # Parse weak secret
+        if re.search(r"weak\s*secret|secret\s*found|cracked", text_output, re.IGNORECASE):
+            findings.append(RawFinding(
+                vulnerability_type="jwt_vulnerability",
+                description="JWT: Слабый секретный ключ",
+                evidence="Weak secret detected",
+                affected_asset_id=asset_id,
+                raw_data={"tool": "jwt_tool", "issue": "weak_secret"},
+            ))
+        
+        return findings
+
+    # ==================================================================
+    # HTTP SMUGGLING PARSERS
+    # ==================================================================
+
+    # ------------------------------------------------------------------
+    # smuggler — text (HTTP Request Smuggling)
+    # ------------------------------------------------------------------
+
+    def parse_smuggler_text(self, text_output: str, asset_id: str) -> list[RawFinding]:
+        findings: list[RawFinding] = []
+        
+        # Parse smuggling techniques
+        techniques = [
+            ("CL.TE", "Content-Length / Transfer-Encoding"),
+            ("TE.CL", "Transfer-Encoding / Content-Length"),
+            ("TE.TE", "Transfer-Encoding obfuscation"),
+            ("CL.0", "Content-Length: 0"),
+        ]
+        
+        for tech_code, tech_name in techniques:
+            if re.search(rf"{tech_code}.*(?:vulnerable|detected|found)", text_output, re.IGNORECASE):
+                findings.append(RawFinding(
+                    vulnerability_type="http_smuggling",
+                    description=f"HTTP Request Smuggling: {tech_name}",
+                    evidence=f"Техника: {tech_code}",
+                    affected_asset_id=asset_id,
+                    raw_data={"tool": "smuggler", "technique": tech_code},
+                ))
+        
+        # Generic smuggling detection
+        if re.search(r"smuggl(?:ing|ed)|desync", text_output, re.IGNORECASE) and not findings:
+            findings.append(RawFinding(
+                vulnerability_type="http_smuggling",
+                description="Потенциальная HTTP Request Smuggling уязвимость",
+                evidence=text_output[:500],
+                affected_asset_id=asset_id,
+                raw_data={"tool": "smuggler", "raw_output": text_output[:2000]},
+            ))
+        
+        return findings
+
+    # ==================================================================
+    # CORS PARSERS
+    # ==================================================================
+
+    # ------------------------------------------------------------------
+    # corscanner — JSON (CORS misconfigurations)
+    # ------------------------------------------------------------------
+
+    def parse_corscanner_json(self, json_output: str, asset_id: str) -> list[RawFinding]:
+        findings: list[RawFinding] = []
+        try:
+            data = json.loads(json_output)
+        except json.JSONDecodeError:
+            # Fallback to text parsing
+            return self._parse_corscanner_text(json_output, asset_id)
+
+        items = data if isinstance(data, list) else [data] if data else []
+        
+        for item in items:
+            url = item.get("url", "unknown")
+            vuln_type = item.get("type", item.get("vulnerability", "CORS misconfiguration"))
+            origin = item.get("origin", "")
+            credentials = item.get("credentials", False)
+            
+            severity = "high" if credentials else "medium"
+            
+            findings.append(RawFinding(
+                vulnerability_type="cors_misconfiguration",
+                description=f"CORS уязвимость на {url}: {vuln_type}",
+                evidence=f"Origin: {origin}, Credentials: {credentials}",
+                affected_asset_id=asset_id,
+                raw_data={"tool": "corscanner", "severity": severity, **item},
+            ))
+        
+        return findings
+
+    def _parse_corscanner_text(self, text_output: str, asset_id: str) -> list[RawFinding]:
+        """Fallback parser for CORScanner text output."""
+        findings: list[RawFinding] = []
+        
+        # Parse CORS issues from text
+        cors_pattern = re.compile(
+            r"(?:CORS|Access-Control).*(?:vulnerable|misconfigured|wildcard|\*)",
+            re.IGNORECASE
+        )
+        for match in cors_pattern.finditer(text_output):
+            finding_text = match.group(0)
+            findings.append(RawFinding(
+                vulnerability_type="cors_misconfiguration",
+                description=f"CORS проблема: {finding_text}",
+                evidence=finding_text,
+                affected_asset_id=asset_id,
+                raw_data={"tool": "corscanner", "raw_line": finding_text},
+            ))
+        
         return findings
