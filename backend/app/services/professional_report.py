@@ -1402,23 +1402,45 @@ class ProfessionalReportGenerator:
             
             violations = ai_analysis["compliance_violations"]
             if isinstance(violations, list) and violations:
-                violation_data = [["Требование", "Нарушение", "Санкции"]]
+                # Create cell style for wrapping text
+                cell_style = ParagraphStyle(
+                    'TableCell',
+                    fontSize=8,
+                    leading=10,
+                    fontName=self._font_name,
+                    textColor=colors.HexColor("#374151"),
+                )
+                header_style = ParagraphStyle(
+                    'TableHeader',
+                    fontSize=9,
+                    leading=11,
+                    fontName=self._font_name,
+                    textColor=colors.white,
+                )
+                
+                violation_data = [
+                    [
+                        Paragraph("<b>Требование</b>", header_style),
+                        Paragraph("<b>Нарушение</b>", header_style),
+                        Paragraph("<b>Санкции</b>", header_style),
+                    ]
+                ]
                 for v in violations[:6]:
                     violation_data.append([
-                        self._clean_text(v.get("regulation", "")),
-                        self._clean_text(v.get("violation", ""))[:50],
-                        self._clean_text(v.get("penalty", ""))[:40],
+                        Paragraph(self._clean_text(v.get("regulation", "")), cell_style),
+                        Paragraph(self._clean_text(v.get("violation", "")), cell_style),
+                        Paragraph(self._clean_text(v.get("penalty", "")), cell_style),
                     ])
                 
-                violation_table = Table(violation_data, colWidths=[4*cm, 6*cm, 5*cm])
+                violation_table = Table(violation_data, colWidths=[4.5*cm, 6*cm, 6*cm])
                 violation_table.setStyle(TableStyle([
                     ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#DC2626")),
-                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
                     ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                    ('FONTNAME', (0, 0), (-1, -1), self._font_name),
-                    ('FONTSIZE', (0, 0), (-1, -1), 9),
-                    ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-                    ('TOPPADDING', (0, 0), (-1, -1), 6),
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                    ('TOPPADDING', (0, 0), (-1, -1), 8),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 6),
                     ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor("#FEF2F2")),
                     ('GRID', (0, 0), (-1, -1), 1, colors.HexColor("#FECACA")),
                 ]))
