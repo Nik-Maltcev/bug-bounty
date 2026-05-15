@@ -209,6 +209,7 @@ export async function stopAIScan(scanId: string): Promise<{ status: string; mess
 
 export interface ProfessionalReportRequest {
   company_name?: string;
+  industry?: 'fintech' | 'ecommerce' | 'healthcare' | 'government' | 'general';
   include_executive_summary?: boolean;
   use_ai_descriptions?: boolean;
 }

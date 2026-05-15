@@ -772,6 +772,7 @@ def stop_ai_analysis(
 class ProfessionalReportRequest(BaseModel):
     """Запрос на генерацию профессионального отчёта."""
     company_name: str = "Клиент"
+    industry: str = "general"  # fintech, ecommerce, healthcare, government, general
     include_executive_summary: bool = True
     use_ai_descriptions: bool = True
 
@@ -806,6 +807,7 @@ def generate_professional_report(
         pdf_bytes = generator.generate_report(
             scan_id=scan_id,
             company_name=body.company_name,
+            industry=body.industry,
             include_executive_summary=body.include_executive_summary,
             use_ai_descriptions=body.use_ai_descriptions,
         )

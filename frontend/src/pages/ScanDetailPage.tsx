@@ -137,6 +137,7 @@ export default function ScanDetailPage() {
   // PDF Report states
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [pdfCompanyName, setPdfCompanyName] = useState('');
+  const [pdfIndustry, setPdfIndustry] = useState<'fintech' | 'ecommerce' | 'healthcare' | 'government' | 'general'>('general');
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
 
@@ -262,6 +263,7 @@ export default function ScanDetailPage() {
     try {
       const blob = await generateProfessionalReport(id, {
         company_name: pdfCompanyName || undefined,
+        industry: pdfIndustry,
         include_executive_summary: true,
         use_ai_descriptions: true,
       });
@@ -278,6 +280,7 @@ export default function ScanDetailPage() {
       
       setShowPdfModal(false);
       setPdfCompanyName('');
+      setPdfIndustry('general');
     } catch (err: unknown) {
       const errorMsg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 
         'Ошибка генерации PDF отчёта';
@@ -689,24 +692,45 @@ export default function ScanDetailPage() {
                 />
               </div>
               
+              <div>
+                <label className="block text-sm text-slate-400 mb-2">
+                  Отрасль бизнеса
+                </label>
+                <select
+                  value={pdfIndustry}
+                  onChange={(e) => setPdfIndustry(e.target.value as typeof pdfIndustry)}
+                  className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-amber-500"
+                >
+                  <option value="general">Общий бизнес</option>
+                  <option value="fintech">Финтех / Банки</option>
+                  <option value="ecommerce">E-commerce / Ритейл</option>
+                  <option value="healthcare">Медицина / Здравоохранение</option>
+                  <option value="government">Госсектор / КИИ</option>
+                </select>
+              </div>
+              
               <div className="bg-slate-800/50 rounded-xl p-4 space-y-2">
                 <p className="text-sm text-slate-300">Отчёт будет содержать:</p>
                 <ul className="text-sm text-slate-400 space-y-1">
                   <li className="flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-green-400" />
-                    Executive Summary (AI-генерация)
+                    AI-анализ с учётом специфики отрасли
                   </li>
                   <li className="flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-green-400" />
-                    Графики распределения уязвимостей
+                    Сценарии атак на основе найденных уязвимостей
                   </li>
                   <li className="flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-green-400" />
-                    Детальное описание каждой уязвимости
+                    Нарушения законодательства РФ
                   </li>
                   <li className="flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-green-400" />
-                    Рекомендации по устранению
+                    Конкретные шаги по устранению с командами
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-green-400" />
+                    Графики с AI-анализом трендов
                   </li>
                 </ul>
               </div>

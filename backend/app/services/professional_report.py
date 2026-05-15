@@ -158,6 +158,40 @@ BUSINESS_IMPACT = {
     },
 }
 
+# Отрасли и их специфика
+INDUSTRY_INFO = {
+    "fintech": {
+        "name": "Финтех / Банки",
+        "regulations": ["152-ФЗ", "PCI DSS", "ГОСТ Р 57580", "683-П ЦБ РФ"],
+        "risks": "Финансовые потери клиентов, отзыв лицензии ЦБ, уголовная ответственность",
+        "data_types": "Платёжные данные, банковская тайна, персональные данные",
+    },
+    "ecommerce": {
+        "name": "E-commerce / Ритейл",
+        "regulations": ["152-ФЗ", "PCI DSS", "Закон о защите прав потребителей"],
+        "risks": "Утечка данных покупателей, мошенничество с картами, потеря репутации",
+        "data_types": "Данные карт, адреса доставки, история покупок",
+    },
+    "healthcare": {
+        "name": "Медицина / Здравоохранение",
+        "regulations": ["152-ФЗ", "323-ФЗ", "Врачебная тайна"],
+        "risks": "Утечка медицинских данных, угроза жизни пациентов, уголовная ответственность",
+        "data_types": "Медицинские карты, диагнозы, результаты анализов",
+    },
+    "government": {
+        "name": "Госсектор / КИИ",
+        "regulations": ["187-ФЗ", "152-ФЗ", "Приказы ФСТЭК", "ФСБ требования"],
+        "risks": "Угроза национальной безопасности, уголовная ответственность до 10 лет",
+        "data_types": "Государственная тайна, персональные данные граждан",
+    },
+    "general": {
+        "name": "Общий бизнес",
+        "regulations": ["152-ФЗ", "Приказ ФСТЭК №21"],
+        "risks": "Утечка данных, репутационный ущерб, штрафы регуляторов",
+        "data_types": "Персональные данные, коммерческая тайна",
+    },
+}
+
 
 class ProfessionalReportGenerator:
     """Генератор профессиональных PDF-отчётов."""
@@ -221,11 +255,12 @@ class ProfessionalReportGenerator:
         self,
         scan_id: str,
         company_name: str = "Клиент",
+        industry: str = "general",
         include_executive_summary: bool = True,
         use_ai_descriptions: bool = True,
     ) -> bytes:
         """Генерирует профессиональный PDF-отчёт."""
-        logger.info("Generating professional report for scan %s", scan_id)
+        logger.info("Generating professional report for scan %s, industry=%s", scan_id, industry)
         
         scan = self.db.query(Scan).filter(Scan.id == scan_id).first()
         if not scan:
@@ -240,10 +275,10 @@ class ProfessionalReportGenerator:
         
         stats = self._calculate_stats(vulns)
         
-        # AI Summary
-        ai_summary = None
+        # Full AI Analysis - single comprehensive request
+        ai_analysis = None
         if use_ai_descriptions:
-            ai_summary = self._generate_ai_summary(vulns, target_url, company_name)
+            ai_analysis = self._generate_full_ai_analysis(vulns, target_url, company_name, industry, stats)
         
         # Create PDF
         buffer = io.BytesIO()
@@ -259,28 +294,28 @@ class ProfessionalReportGenerator:
         story = []
         
         # Title page
-        story.extend(self._create_title_page(company_name, target_url, scan, stats))
+        story.extend(self._create_title_page(company_name, target_url, scan, stats, industry))
         story.append(PageBreak())
         
-        # Executive Summary
+        # Executive Summary (AI-generated)
         if include_executive_summary:
-            story.extend(self._create_executive_summary(stats, ai_summary, company_name))
+            story.extend(self._create_executive_summary_ai(stats, ai_analysis, company_name, industry))
             story.append(PageBreak())
         
-        # Business Impact & Metrics
-        story.extend(self._create_business_impact_section(stats, vulns))
+        # Business Impact & Metrics (AI-enhanced)
+        story.extend(self._create_business_impact_section_ai(stats, vulns, ai_analysis, industry))
         story.append(PageBreak())
         
-        # Charts
-        story.extend(self._create_charts_section(stats))
+        # Charts with AI trend analysis
+        story.extend(self._create_charts_section_ai(stats, ai_analysis))
         story.append(PageBreak())
         
-        # Vulnerabilities
-        story.extend(self._create_vulnerabilities_section(vulns))
+        # Vulnerabilities with AI descriptions
+        story.extend(self._create_vulnerabilities_section_ai(vulns, ai_analysis))
         
-        # Recommendations
+        # Recommendations (AI-generated specific steps)
         story.append(PageBreak())
-        story.extend(self._create_recommendations_section(vulns, ai_summary))
+        story.extend(self._create_recommendations_section_ai(vulns, ai_analysis))
         
         doc.build(story)
         
@@ -314,40 +349,112 @@ class ProfessionalReportGenerator:
         
         return stats
 
-    def _generate_ai_summary(
+    def _generate_full_ai_analysis(
         self,
         vulns: list[VulnerabilityRecord],
         target_url: str,
         company_name: str,
+        industry: str,
+        stats: dict,
     ) -> dict | None:
-        """Генерирует AI-описания через DeepSeek V4 Pro."""
+        """Генерирует полный AI-анализ через DeepSeek."""
         api_key = os.environ.get("DEEPSEEK_API_KEY")
         if not api_key:
-            logger.warning("DEEPSEEK_API_KEY not set, skipping AI summary")
+            logger.warning("DEEPSEEK_API_KEY not set, skipping AI analysis")
             return None
+        
+        industry_info = INDUSTRY_INFO.get(industry, INDUSTRY_INFO["general"])
         
         try:
             import httpx
             
-            vuln_list = []
-            for v in vulns[:20]:
-                vuln_list.append({
+            # Prepare vulnerability summary
+            vuln_summary = []
+            for v in vulns[:25]:
+                vuln_summary.append({
                     "type": v.vulnerability_type,
                     "severity": v.severity,
-                    "description": v.description[:200] if v.description else "",
+                    "description": (v.description or "")[:300],
                 })
             
-            prompt = f"""Ты — эксперт по кибербезопасности. Создай профессиональный отчёт для клиента НА РУССКОМ ЯЗЫКЕ.
+            prompt = f"""Ты — ведущий эксперт по кибербезопасности с 15-летним опытом. Создай ПОЛНЫЙ профессиональный анализ безопасности.
 
-Цель: {target_url}
-Компания: {company_name}
-Найденные уязвимости: {json.dumps(vuln_list, ensure_ascii=False)}
+КОНТЕКСТ:
+- Цель сканирования: {target_url}
+- Компания: {company_name}
+- Отрасль: {industry_info['name']}
+- Применимые регуляции: {', '.join(industry_info['regulations'])}
+- Типы данных под угрозой: {industry_info['data_types']}
 
-Сгенерируй JSON с полями (ВСЕ ТЕКСТЫ НА РУССКОМ):
-1. "executive_summary" — краткое резюме для руководства (2-3 абзаца на русском)
-2. "risk_assessment" — оценка бизнес-рисков на русском (что может произойти если не исправить)
-3. "priority_actions" — список из 5 приоритетных действий на русском
-4. "overall_score" — оценка безопасности от 1 до 10 (10 = отлично)
+СТАТИСТИКА:
+- Всего уязвимостей: {stats['total']}
+- Критических: {stats['critical']}
+- Высоких: {stats['high']}
+- Средних: {stats['medium']}
+- Низких: {stats['low']}
+
+НАЙДЕННЫЕ УЯЗВИМОСТИ:
+{json.dumps(vuln_summary, ensure_ascii=False, indent=2)}
+
+Сгенерируй JSON со следующими полями (ВСЕ НА РУССКОМ ЯЗЫКЕ):
+
+{{
+  "executive_summary": "Резюме для руководства: 3-4 абзаца с общей оценкой, ключевыми рисками для бизнеса в отрасли {industry_info['name']}, и срочностью действий",
+  
+  "overall_score": число от 1 до 10 (10 = отлично защищён),
+  
+  "risk_level": "КРИТИЧЕСКИЙ/ВЫСОКИЙ/СРЕДНИЙ/НИЗКИЙ",
+  
+  "industry_specific_risks": "2-3 абзаца о специфических рисках для отрасли {industry_info['name']} на основе найденных уязвимостей",
+  
+  "chart_analysis": "Анализ распределения уязвимостей: что показывают графики, какие тренды видны, на что обратить внимание",
+  
+  "attack_scenarios": [
+    {{
+      "name": "Название сценария атаки",
+      "description": "Как злоумышленник может использовать найденные уязвимости",
+      "impact": "Последствия для бизнеса",
+      "probability": "ВЫСОКАЯ/СРЕДНЯЯ/НИЗКАЯ"
+    }}
+  ],
+  
+  "compliance_violations": [
+    {{
+      "regulation": "Название закона/стандарта",
+      "violation": "Какое требование нарушено",
+      "penalty": "Возможные санкции",
+      "based_on": "На основе каких уязвимостей"
+    }}
+  ],
+  
+  "remediation_steps": [
+    {{
+      "priority": 1,
+      "title": "Название действия",
+      "description": "Подробное описание что нужно сделать",
+      "commands": ["конкретная команда 1", "команда 2"],
+      "timeline": "Срок выполнения",
+      "responsible": "Кто должен выполнить"
+    }}
+  ],
+  
+  "vulnerabilities_analysis": [
+    {{
+      "type": "тип уязвимости",
+      "title_ru": "Название на русском",
+      "description_ru": "Описание на русском",
+      "business_impact": "Влияние на бизнес",
+      "remediation_ru": "Рекомендации по устранению на русском с конкретными шагами"
+    }}
+  ]
+}}
+
+ВАЖНО:
+- Все тексты на русском языке
+- Анализ должен быть основан ТОЛЬКО на реально найденных уязвимостях
+- Не придумывай уязвимости которых нет
+- Рекомендации должны быть конкретными с командами и шагами
+- Учитывай специфику отрасли {industry_info['name']}
 
 Отвечай ТОЛЬКО валидным JSON без markdown."""
 
@@ -358,24 +465,34 @@ class ProfessionalReportGenerator:
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": "deepseek-v4-pro",
+                    "model": "deepseek-chat",
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.3,
-                    "max_tokens": 2000,
+                    "max_tokens": 6000,
                 },
-                timeout=60.0,
+                timeout=120.0,
             )
             
             if response.status_code == 200:
                 data = response.json()
                 content = data["choices"][0]["message"]["content"]
-                return json.loads(content)
+                # Clean markdown if present
+                content = content.strip()
+                if content.startswith("```"):
+                    content = content.split("\n", 1)[1]
+                if content.endswith("```"):
+                    content = content.rsplit("```", 1)[0]
+                content = content.strip()
+                
+                result = json.loads(content)
+                logger.info("AI analysis generated successfully")
+                return result
             else:
                 logger.error("DeepSeek API error: %s", response.text)
                 return None
                 
         except Exception as e:
-            logger.exception("Failed to generate AI summary: %s", e)
+            logger.exception("Failed to generate AI analysis: %s", e)
             return None
 
     def _create_title_page(
@@ -384,14 +501,29 @@ class ProfessionalReportGenerator:
         target_url: str,
         scan: Scan,
         stats: dict,
+        industry: str = "general",
     ) -> list:
         """Создаёт титульную страницу."""
         story = []
+        
+        industry_info = INDUSTRY_INFO.get(industry, INDUSTRY_INFO["general"])
         
         story.append(Spacer(1, 3*cm))
         story.append(Paragraph(
             "ОТЧЁТ О ТЕСТИРОВАНИИ<br/>БЕЗОПАСНОСТИ",
             self._styles['ReportTitle']
+        ))
+        
+        story.append(Spacer(1, 0.5*cm))
+        story.append(Paragraph(
+            f"<i>{industry_info['name']}</i>",
+            ParagraphStyle(
+                'IndustryLabel',
+                fontSize=12,
+                alignment=TA_CENTER,
+                textColor=colors.HexColor("#6B7280"),
+                fontName=self._font_name,
+            )
         ))
         
         story.append(Spacer(1, 1*cm))
@@ -1156,6 +1288,332 @@ class ProfessionalReportGenerator:
             При возникновении вопросов по результатам тестирования обращайтесь к специалистам
             по информационной безопасности.
             """,
+            self._styles['CustomBody']
+        ))
+        
+        return story
+
+    # ==================== NEW AI-POWERED METHODS ====================
+    
+    def _create_executive_summary_ai(
+        self,
+        stats: dict,
+        ai_analysis: dict | None,
+        company_name: str,
+        industry: str,
+    ) -> list:
+        """Создаёт AI-генерируемое Executive Summary."""
+        story = []
+        
+        story.append(Paragraph("РЕЗЮМЕ ДЛЯ РУКОВОДСТВА", self._styles['SectionTitle']))
+        
+        if ai_analysis and "executive_summary" in ai_analysis:
+            summary = self._clean_text(ai_analysis["executive_summary"])
+            story.append(Paragraph(summary, self._styles['CustomBody']))
+        else:
+            # Fallback
+            critical_high = stats["critical"] + stats["high"]
+            risk_level = "КРИТИЧЕСКИЙ" if stats["critical"] > 0 else "ВЫСОКИЙ" if stats["high"] > 0 else "СРЕДНИЙ"
+            story.append(Paragraph(
+                f"В ходе тестирования обнаружено {stats['total']} уязвимостей. "
+                f"Уровень риска: {risk_level}.",
+                self._styles['CustomBody']
+            ))
+        
+        # Risk level badge
+        if ai_analysis and "risk_level" in ai_analysis:
+            risk_level = ai_analysis["risk_level"]
+            risk_colors = {
+                "КРИТИЧЕСКИЙ": "#DC2626",
+                "ВЫСОКИЙ": "#EA580C", 
+                "СРЕДНИЙ": "#CA8A04",
+                "НИЗКИЙ": "#22C55E",
+            }
+            color = risk_colors.get(risk_level, "#6B7280")
+            story.append(Spacer(1, 0.3*cm))
+            story.append(Paragraph(
+                f"<b>Уровень риска: <font color='{color}'>{risk_level}</font></b>",
+                self._styles['VulnTitle']
+            ))
+        
+        # Score
+        if ai_analysis and "overall_score" in ai_analysis:
+            score = ai_analysis["overall_score"]
+            story.append(Paragraph(
+                f"<b>Оценка безопасности: {score}/10</b>",
+                self._styles['VulnTitle']
+            ))
+        
+        # Industry-specific risks
+        if ai_analysis and "industry_specific_risks" in ai_analysis:
+            story.append(Spacer(1, 0.5*cm))
+            industry_info = INDUSTRY_INFO.get(industry, INDUSTRY_INFO["general"])
+            story.append(Paragraph(
+                f"<b>Специфические риски для отрасли «{industry_info['name']}»</b>",
+                self._styles['VulnTitle']
+            ))
+            risks = self._clean_text(ai_analysis["industry_specific_risks"])
+            story.append(Paragraph(risks, self._styles['CustomBody']))
+        
+        return story
+
+    def _create_business_impact_section_ai(
+        self,
+        stats: dict,
+        vulns: list[VulnerabilityRecord],
+        ai_analysis: dict | None,
+        industry: str,
+    ) -> list:
+        """Создаёт AI-улучшенную секцию бизнес-влияния."""
+        story = []
+        
+        story.append(Paragraph("ОЦЕНКА БИЗНЕС-ВЛИЯНИЯ", self._styles['SectionTitle']))
+        
+        # Attack scenarios from AI
+        if ai_analysis and "attack_scenarios" in ai_analysis:
+            story.append(Paragraph("<b>Сценарии атак (на основе найденных уязвимостей)</b>", self._styles['VulnTitle']))
+            story.append(Spacer(1, 0.2*cm))
+            
+            scenarios = ai_analysis["attack_scenarios"]
+            if isinstance(scenarios, list):
+                for scenario in scenarios[:5]:
+                    name = self._clean_text(scenario.get("name", ""))
+                    desc = self._clean_text(scenario.get("description", ""))
+                    impact = self._clean_text(scenario.get("impact", ""))
+                    prob = scenario.get("probability", "СРЕДНЯЯ")
+                    
+                    prob_colors = {"ВЫСОКАЯ": "#DC2626", "СРЕДНЯЯ": "#CA8A04", "НИЗКАЯ": "#22C55E"}
+                    prob_color = prob_colors.get(prob, "#6B7280")
+                    
+                    story.append(Paragraph(
+                        f"• <b>{name}</b> [<font color='{prob_color}'>{prob}</font>]<br/>"
+                        f"{desc}<br/>"
+                        f"<i>Последствия: {impact}</i>",
+                        self._styles['CustomBody']
+                    ))
+                    story.append(Spacer(1, 0.2*cm))
+        
+        story.append(Spacer(1, 0.5*cm))
+        
+        # Compliance violations from AI
+        if ai_analysis and "compliance_violations" in ai_analysis:
+            story.append(Paragraph("<b>Нарушения требований законодательства</b>", self._styles['VulnTitle']))
+            story.append(Spacer(1, 0.2*cm))
+            
+            violations = ai_analysis["compliance_violations"]
+            if isinstance(violations, list) and violations:
+                violation_data = [["Требование", "Нарушение", "Санкции"]]
+                for v in violations[:6]:
+                    violation_data.append([
+                        self._clean_text(v.get("regulation", "")),
+                        self._clean_text(v.get("violation", ""))[:50],
+                        self._clean_text(v.get("penalty", ""))[:40],
+                    ])
+                
+                violation_table = Table(violation_data, colWidths=[4*cm, 6*cm, 5*cm])
+                violation_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#DC2626")),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                    ('FONTNAME', (0, 0), (-1, -1), self._font_name),
+                    ('FONTSIZE', (0, 0), (-1, -1), 9),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                    ('TOPPADDING', (0, 0), (-1, -1), 6),
+                    ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor("#FEF2F2")),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.HexColor("#FECACA")),
+                ]))
+                story.append(violation_table)
+        else:
+            story.append(Paragraph(
+                "На основании анализа существенных нарушений законодательства не выявлено.",
+                self._styles['CustomBody']
+            ))
+        
+        return story
+
+    def _create_charts_section_ai(self, stats: dict, ai_analysis: dict | None) -> list:
+        """Создаёт секцию с графиками и AI-анализом трендов."""
+        story = []
+        
+        story.append(Paragraph("ВИЗУАЛИЗАЦИЯ РЕЗУЛЬТАТОВ", self._styles['SectionTitle']))
+        
+        # Pie chart
+        pie_chart = self._create_severity_pie_chart(stats)
+        if pie_chart:
+            story.append(Image(pie_chart, width=12*cm, height=12*cm))
+        
+        story.append(Spacer(1, 0.5*cm))
+        
+        # AI chart analysis
+        if ai_analysis and "chart_analysis" in ai_analysis:
+            story.append(Paragraph("<b>Анализ распределения</b>", self._styles['VulnTitle']))
+            analysis = self._clean_text(ai_analysis["chart_analysis"])
+            story.append(Paragraph(analysis, self._styles['CustomBody']))
+        
+        story.append(Spacer(1, 1*cm))
+        
+        # Bar chart
+        if stats["by_type"]:
+            bar_chart = self._create_type_bar_chart(stats["by_type"])
+            if bar_chart:
+                story.append(Image(bar_chart, width=16*cm, height=10*cm))
+        
+        return story
+
+    def _create_vulnerabilities_section_ai(
+        self,
+        vulns: list[VulnerabilityRecord],
+        ai_analysis: dict | None,
+    ) -> list:
+        """Создаёт секцию уязвимостей с AI-описаниями."""
+        story = []
+        
+        story.append(Paragraph("ДЕТАЛЬНОЕ ОПИСАНИЕ УЯЗВИМОСТЕЙ", self._styles['SectionTitle']))
+        
+        # Get AI-generated vulnerability analysis
+        ai_vulns = {}
+        if ai_analysis and "vulnerabilities_analysis" in ai_analysis:
+            for av in ai_analysis["vulnerabilities_analysis"]:
+                vtype = av.get("type", "")
+                ai_vulns[vtype] = av
+        
+        severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "informational": 4}
+        sorted_vulns = sorted(
+            vulns,
+            key=lambda v: severity_order.get(v.severity.lower() if v.severity else "informational", 5)
+        )
+        
+        for i, vuln in enumerate(sorted_vulns[:30], 1):
+            severity = vuln.severity.lower() if vuln.severity else "informational"
+            severity_color = SEVERITY_COLORS.get(severity, "#6B7280")
+            severity_label = SEVERITY_LABELS_RU.get(severity, severity.upper())
+            
+            # Try to get AI analysis for this vulnerability type
+            ai_vuln = ai_vulns.get(vuln.vulnerability_type, {})
+            
+            title = ai_vuln.get("title_ru", vuln.vulnerability_type or "Unknown")
+            story.append(Paragraph(
+                f"{i}. [{severity_label.upper()}] {title}",
+                ParagraphStyle(
+                    f'VulnHeaderAI_{i}',
+                    fontSize=11,
+                    leading=14,
+                    spaceBefore=15,
+                    spaceAfter=5,
+                    textColor=colors.HexColor(severity_color),
+                    fontName=self._font_name,
+                )
+            ))
+            
+            # Description
+            desc = ai_vuln.get("description_ru") or vuln.description
+            if desc:
+                desc = self._clean_text(desc[:500])
+                story.append(Paragraph(f"<b>Описание:</b> {desc}", self._styles['CustomBody']))
+            
+            # Business impact from AI
+            if ai_vuln.get("business_impact"):
+                impact = self._clean_text(ai_vuln["business_impact"])
+                story.append(Paragraph(f"<b>Влияние на бизнес:</b> {impact}", self._styles['CustomBody']))
+            
+            # Evidence
+            if vuln.evidence:
+                evidence = self._clean_text(vuln.evidence[:200])
+                story.append(Paragraph(f"<b>Доказательство:</b> {evidence}", self._styles['CustomBody']))
+            
+            # Remediation from AI or original
+            remediation = ai_vuln.get("remediation_ru") or vuln.remediation
+            if remediation:
+                remediation = self._clean_text(remediation[:500])
+                remediation = self._format_numbered_list(remediation)
+                story.append(Paragraph(f"<b>Рекомендация:</b><br/>{remediation}", self._styles['CustomBody']))
+            
+            story.append(Spacer(1, 0.3*cm))
+        
+        return story
+
+    def _create_recommendations_section_ai(
+        self,
+        vulns: list[VulnerabilityRecord],
+        ai_analysis: dict | None,
+    ) -> list:
+        """Создаёт AI-генерируемую секцию рекомендаций с конкретными шагами."""
+        story = []
+        
+        story.append(Paragraph("ПЛАН УСТРАНЕНИЯ УЯЗВИМОСТЕЙ", self._styles['SectionTitle']))
+        
+        if ai_analysis and "remediation_steps" in ai_analysis:
+            steps = ai_analysis["remediation_steps"]
+            if isinstance(steps, list):
+                for step in steps[:10]:
+                    priority = step.get("priority", "")
+                    title = self._clean_text(step.get("title", ""))
+                    description = self._clean_text(step.get("description", ""))
+                    timeline = step.get("timeline", "")
+                    responsible = step.get("responsible", "")
+                    commands = step.get("commands", [])
+                    
+                    # Priority color
+                    if priority <= 2:
+                        prio_color = "#DC2626"
+                        prio_label = "СРОЧНО"
+                    elif priority <= 4:
+                        prio_color = "#EA580C"
+                        prio_label = "ВЫСОКИЙ"
+                    else:
+                        prio_color = "#CA8A04"
+                        prio_label = "СРЕДНИЙ"
+                    
+                    story.append(Paragraph(
+                        f"<b>{priority}. {title}</b> [<font color='{prio_color}'>{prio_label}</font>]",
+                        self._styles['VulnTitle']
+                    ))
+                    
+                    story.append(Paragraph(description, self._styles['CustomBody']))
+                    
+                    # Commands
+                    if commands and isinstance(commands, list):
+                        story.append(Paragraph("<b>Команды:</b>", self._styles['CustomBody']))
+                        for cmd in commands[:5]:
+                            cmd_clean = self._clean_text(cmd)
+                            story.append(Paragraph(
+                                f"<font face='Courier' size='9'>{cmd_clean}</font>",
+                                self._styles['CustomBody']
+                            ))
+                    
+                    # Timeline and responsible
+                    if timeline or responsible:
+                        meta = []
+                        if timeline:
+                            meta.append(f"Срок: {timeline}")
+                        if responsible:
+                            meta.append(f"Ответственный: {responsible}")
+                        story.append(Paragraph(
+                            f"<i>{' | '.join(meta)}</i>",
+                            self._styles['CustomBody']
+                        ))
+                    
+                    story.append(Spacer(1, 0.3*cm))
+        else:
+            # Fallback recommendations
+            story.append(Paragraph(
+                "1. Немедленно устранить критические уязвимости<br/>"
+                "2. Провести аудит конфигурации<br/>"
+                "3. Обновить все компоненты<br/>"
+                "4. Внедрить WAF<br/>"
+                "5. Настроить мониторинг",
+                self._styles['CustomBody']
+            ))
+        
+        story.append(Spacer(1, 1*cm))
+        
+        story.append(Paragraph("ЗАКЛЮЧЕНИЕ", self._styles['SectionTitle']))
+        story.append(Paragraph(
+            "Данный отчёт сгенерирован с использованием искусственного интеллекта на основе "
+            "результатов автоматизированного сканирования. Все выводы и рекомендации основаны "
+            "исключительно на обнаруженных уязвимостях.<br/><br/>"
+            "Для полной оценки защищённости рекомендуется провести дополнительное ручное "
+            "тестирование на проникновение.",
             self._styles['CustomBody']
         ))
         
