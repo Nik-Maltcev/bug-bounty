@@ -268,7 +268,7 @@ class ProfessionalReportGenerator:
             story.append(PageBreak())
         
         # Business Impact & Metrics
-        story.extend(self._create_business_impact_section(stats))
+        story.extend(self._create_business_impact_section(stats, vulns))
         story.append(PageBreak())
         
         # Charts
@@ -510,11 +510,52 @@ class ProfessionalReportGenerator:
         
         return story
 
-    def _create_business_impact_section(self, stats: dict) -> list:
-        """Создаёт секцию с бизнес-метриками и оценкой потерь."""
+    def _create_business_impact_section(self, stats: dict, vulns: list[VulnerabilityRecord]) -> list:
+        """Создаёт секцию с бизнес-метриками и оценкой потерь на основе найденных уязвимостей."""
         story = []
         
         story.append(Paragraph("ОЦЕНКА БИЗНЕС-ВЛИЯНИЯ", self._styles['SectionTitle']))
+        
+        # Analyze vulnerability types for compliance mapping
+        vuln_types = set()
+        vuln_categories = {
+            "data_leak": False,      # Утечка данных -> 152-ФЗ
+            "auth_bypass": False,    # Обход аутентификации -> все
+            "injection": False,      # Инъекции -> все
+            "xss": False,            # XSS -> 152-ФЗ, PCI DSS
+            "payment": False,        # Платёжные данные -> PCI DSS
+            "rce": False,            # RCE -> 187-ФЗ КИИ
+            "config": False,         # Конфигурация -> ГОСТ, ФСТЭК
+            "crypto": False,         # Криптография -> ГОСТ
+        }
+        
+        for v in vulns:
+            vtype = (v.vulnerability_type or "").lower()
+            vuln_types.add(vtype)
+            desc = (v.description or "").lower()
+            
+            # Categorize vulnerabilities
+            if any(x in vtype for x in ["sql", "injection", "sqli"]):
+                vuln_categories["injection"] = True
+                vuln_categories["data_leak"] = True
+            if any(x in vtype for x in ["xss", "cross-site", "script"]):
+                vuln_categories["xss"] = True
+            if any(x in vtype for x in ["auth", "login", "session", "bypass", "credential"]):
+                vuln_categories["auth_bypass"] = True
+            if any(x in vtype for x in ["rce", "remote-code", "command", "exec"]):
+                vuln_categories["rce"] = True
+            if any(x in vtype for x in ["payment", "card", "credit", "pci"]):
+                vuln_categories["payment"] = True
+            if any(x in vtype for x in ["config", "misconfiguration", "default", "exposure"]):
+                vuln_categories["config"] = True
+            if any(x in vtype for x in ["ssl", "tls", "crypto", "certificate", "weak"]):
+                vuln_categories["crypto"] = True
+            if any(x in vtype for x in ["leak", "disclosure", "sensitive", "personal", "data"]):
+                vuln_categories["data_leak"] = True
+            
+            # Check description too
+            if "персональн" in desc or "personal" in desc or "пользовател" in desc:
+                vuln_categories["data_leak"] = True
         
         # Calculate potential losses
         total_min_loss = 0
@@ -626,32 +667,46 @@ class ProfessionalReportGenerator:
         
         story.append(Spacer(1, 0.8*cm))
         
-        # Risk scenarios
-        story.append(Paragraph("<b>Сценарии реализации угроз</b>", self._styles['VulnTitle']))
+        # Risk scenarios based on ACTUAL vulnerabilities found
+        story.append(Paragraph("<b>Сценарии реализации угроз (на основе найденных уязвимостей)</b>", self._styles['VulnTitle']))
         story.append(Spacer(1, 0.2*cm))
         
         scenarios = []
-        if stats.get("critical", 0) > 0:
+        
+        if vuln_categories["rce"] or stats.get("critical", 0) > 0:
             scenarios.append(
-                "• <b>Критический сценарий:</b> Злоумышленник получает полный контроль над системой, "
-                "похищает базу данных клиентов, требует выкуп. Потери: судебные иски, штрафы Роскомнадзора, "
-                "потеря клиентов, простой бизнеса до 30 дней."
+                "• <b>Захват системы:</b> Обнаружены уязвимости, позволяющие выполнить произвольный код. "
+                "Злоумышленник может получить полный контроль над сервером, похитить данные, установить вредоносное ПО."
             )
-        if stats.get("high", 0) > 0:
+        
+        if vuln_categories["injection"]:
             scenarios.append(
-                "• <b>Высокий риск:</b> Компрометация учётных записей пользователей, утечка персональных данных. "
-                "Штраф по 152-ФЗ до 18 млн руб., уведомление Роскомнадзора в течение 24 часов, репутационный ущерб."
+                "• <b>SQL-инъекция:</b> Найдены уязвимости инъекций. Возможна кража всей базы данных, "
+                "модификация или удаление информации, обход аутентификации."
             )
-        if stats.get("medium", 0) > 0:
+        
+        if vuln_categories["data_leak"] or vuln_categories["auth_bypass"]:
             scenarios.append(
-                "• <b>Средний риск:</b> Атаки на пользователей через XSS/CSRF, фишинг от имени компании. "
-                "Потеря доверия клиентов, затраты на расследование и устранение."
+                "• <b>Утечка данных:</b> Обнаружены уязвимости, ведущие к раскрытию персональных данных. "
+                "Штраф по 152-ФЗ до 18 млн руб., обязательное уведомление Роскомнадзора в течение 24 часов."
+            )
+        
+        if vuln_categories["xss"]:
+            scenarios.append(
+                "• <b>Атаки на пользователей:</b> Найдены XSS-уязвимости. Возможен перехват сессий, "
+                "фишинг от имени сайта, кража учётных данных пользователей."
+            )
+        
+        if vuln_categories["config"] or vuln_categories["crypto"]:
+            scenarios.append(
+                "• <b>Небезопасная конфигурация:</b> Выявлены проблемы конфигурации и криптографии. "
+                "Нарушение требований ГОСТ Р 57580 и Приказа ФСТЭК №21."
             )
         
         if not scenarios:
             scenarios.append(
-                "• Текущий уровень безопасности не выявил критических угроз для бизнеса. "
-                "Рекомендуется поддерживать регулярный мониторинг."
+                "• Критических сценариев атак не выявлено. Найденные уязвимости носят информационный характер. "
+                "Рекомендуется устранить для повышения общего уровня защищённости."
             )
         
         for scenario in scenarios:
@@ -659,18 +714,62 @@ class ProfessionalReportGenerator:
         
         story.append(Spacer(1, 0.5*cm))
         
-        # Compliance risks - Russian legislation
-        story.append(Paragraph("<b>Риски несоответствия требованиям законодательства РФ</b>", self._styles['VulnTitle']))
+        # Compliance risks - ONLY based on found vulnerabilities
+        story.append(Paragraph("<b>Применимые требования законодательства РФ</b>", self._styles['VulnTitle']))
+        story.append(Spacer(1, 0.2*cm))
         
-        compliance_text = """
-        Обнаруженные уязвимости могут привести к нарушению следующих требований:<br/>
-        • <b>152-ФЗ «О персональных данных»</b> — штраф до 18 млн руб., блокировка сайта Роскомнадзором<br/>
-        • <b>187-ФЗ «О КИИ»</b> — уголовная ответственность до 10 лет для объектов КИИ<br/>
-        • <b>PCI DSS</b> — штрафы 500 тыс - 10 млн руб./месяц, отзыв права обработки карт<br/>
-        • <b>ГОСТ Р 57580</b> — предписания ЦБ РФ для финансовых организаций<br/>
-        • <b>Приказ ФСТЭК №21</b> — требования к защите ИСПДн, проверки регулятора
-        """
-        story.append(Paragraph(compliance_text, self._styles['CustomBody']))
+        compliance_risks = []
+        
+        # 152-ФЗ - if data leak or auth issues found
+        if vuln_categories["data_leak"] or vuln_categories["auth_bypass"] or vuln_categories["injection"]:
+            compliance_risks.append(
+                "• <b>152-ФЗ «О персональных данных»</b><br/>"
+                "Найденные уязвимости могут привести к утечке ПДн.<br/>"
+                "Штраф: до 18 млн руб. Риск блокировки сайта Роскомнадзором."
+            )
+        
+        # 187-ФЗ КИИ - if RCE or critical found
+        if vuln_categories["rce"] or stats.get("critical", 0) > 0:
+            compliance_risks.append(
+                "• <b>187-ФЗ «О безопасности КИИ»</b><br/>"
+                "Критические уязвимости создают угрозу для объектов КИИ.<br/>"
+                "Риск: уголовная ответственность до 10 лет (ст. 274.1 УК РФ)."
+            )
+        
+        # PCI DSS - if payment or XSS/injection found
+        if vuln_categories["payment"] or vuln_categories["xss"] or vuln_categories["injection"]:
+            compliance_risks.append(
+                "• <b>PCI DSS</b><br/>"
+                "Уязвимости угрожают безопасности платёжных данных.<br/>"
+                "Штраф: 500 тыс - 10 млн руб./месяц, отзыв права обработки карт."
+            )
+        
+        # ГОСТ Р 57580 - if crypto or config issues
+        if vuln_categories["crypto"] or vuln_categories["config"]:
+            compliance_risks.append(
+                "• <b>ГОСТ Р 57580.1-2017</b><br/>"
+                "Нарушены требования к защите информации в финансовых организациях.<br/>"
+                "Риск: предписания ЦБ РФ, ограничение операций."
+            )
+        
+        # Приказ ФСТЭК №21 - if any security issues
+        if stats.get("critical", 0) > 0 or stats.get("high", 0) > 0 or vuln_categories["config"]:
+            compliance_risks.append(
+                "• <b>Приказ ФСТЭК России №21</b><br/>"
+                "Не выполнены меры по защите ИСПДн.<br/>"
+                "Риск: предписания регулятора, внеплановые проверки."
+            )
+        
+        if compliance_risks:
+            for risk in compliance_risks:
+                story.append(Paragraph(risk, self._styles['CustomBody']))
+                story.append(Spacer(1, 0.2*cm))
+        else:
+            story.append(Paragraph(
+                "На основании найденных уязвимостей существенных рисков нарушения законодательства не выявлено. "
+                "Рекомендуется поддерживать текущий уровень защищённости.",
+                self._styles['CustomBody']
+            ))
         
         return story
 
