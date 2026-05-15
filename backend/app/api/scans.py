@@ -570,7 +570,7 @@ def start_ai_analysis(
             provider=ProviderType.DEEPSEEK,
             api_key=deepseek_key,
             base_url="https://api.deepseek.com",
-            model="deepseek-chat",
+            model="deepseek-v4-pro",
             temperature=0.3,
         )
     
