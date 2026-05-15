@@ -92,6 +92,72 @@ SEVERITY_LABELS_RU = {
     "informational": "Информационные",
 }
 
+# Бизнес-метрики для оценки потерь (в USD)
+BUSINESS_IMPACT = {
+    "critical": {
+        "min_loss": 500000,
+        "max_loss": 5000000,
+        "avg_loss": 1500000,
+        "recovery_days": 30,
+        "reputation_impact": "Катастрофический",
+        "examples": [
+            "Полная компрометация базы данных клиентов",
+            "Утечка платёжных данных (PCI DSS нарушение)",
+            "Удалённое выполнение кода на сервере",
+            "Полный захват инфраструктуры",
+        ],
+    },
+    "high": {
+        "min_loss": 100000,
+        "max_loss": 500000,
+        "avg_loss": 250000,
+        "recovery_days": 14,
+        "reputation_impact": "Серьёзный",
+        "examples": [
+            "Несанкционированный доступ к аккаунтам",
+            "Утечка персональных данных (GDPR штраф)",
+            "SQL-инъекция с доступом к данным",
+            "Обход аутентификации",
+        ],
+    },
+    "medium": {
+        "min_loss": 10000,
+        "max_loss": 100000,
+        "avg_loss": 50000,
+        "recovery_days": 7,
+        "reputation_impact": "Умеренный",
+        "examples": [
+            "XSS атаки на пользователей",
+            "Раскрытие внутренней информации",
+            "CSRF атаки",
+            "Небезопасная конфигурация",
+        ],
+    },
+    "low": {
+        "min_loss": 1000,
+        "max_loss": 10000,
+        "avg_loss": 5000,
+        "recovery_days": 3,
+        "reputation_impact": "Минимальный",
+        "examples": [
+            "Раскрытие версий ПО",
+            "Отсутствие security headers",
+            "Информационные утечки",
+        ],
+    },
+    "informational": {
+        "min_loss": 0,
+        "max_loss": 1000,
+        "avg_loss": 500,
+        "recovery_days": 1,
+        "reputation_impact": "Отсутствует",
+        "examples": [
+            "Рекомендации по улучшению",
+            "Best practices",
+        ],
+    },
+}
+
 
 class ProfessionalReportGenerator:
     """Генератор профессиональных PDF-отчётов."""
@@ -200,6 +266,10 @@ class ProfessionalReportGenerator:
         if include_executive_summary:
             story.extend(self._create_executive_summary(stats, ai_summary, company_name))
             story.append(PageBreak())
+        
+        # Business Impact & Metrics
+        story.extend(self._create_business_impact_section(stats))
+        story.append(PageBreak())
         
         # Charts
         story.extend(self._create_charts_section(stats))
@@ -437,6 +507,167 @@ class ProfessionalReportGenerator:
                 f"<b>Оценка безопасности: {score}/10</b>",
                 self._styles['VulnTitle']
             ))
+        
+        return story
+
+    def _create_business_impact_section(self, stats: dict) -> list:
+        """Создаёт секцию с бизнес-метриками и оценкой потерь."""
+        story = []
+        
+        story.append(Paragraph("ОЦЕНКА БИЗНЕС-ВЛИЯНИЯ", self._styles['SectionTitle']))
+        
+        # Calculate potential losses
+        total_min_loss = 0
+        total_max_loss = 0
+        total_avg_loss = 0
+        max_recovery_days = 0
+        
+        for severity in ["critical", "high", "medium", "low", "informational"]:
+            count = stats.get(severity, 0)
+            if count > 0:
+                impact = BUSINESS_IMPACT[severity]
+                total_min_loss += impact["min_loss"] * count
+                total_max_loss += impact["max_loss"] * count
+                total_avg_loss += impact["avg_loss"] * count
+                max_recovery_days = max(max_recovery_days, impact["recovery_days"])
+        
+        # Format currency
+        def fmt_currency(val):
+            if val >= 1000000:
+                return f"${val/1000000:.1f}M"
+            elif val >= 1000:
+                return f"${val/1000:.0f}K"
+            else:
+                return f"${val:.0f}"
+        
+        # Key metrics table
+        story.append(Paragraph("<b>Ключевые финансовые показатели</b>", self._styles['VulnTitle']))
+        story.append(Spacer(1, 0.3*cm))
+        
+        metrics_data = [
+            ["Метрика", "Значение", "Комментарий"],
+            ["Минимальные потери", fmt_currency(total_min_loss), "При быстром реагировании"],
+            ["Максимальные потери", fmt_currency(total_max_loss), "При отсутствии мер"],
+            ["Ожидаемые потери", fmt_currency(total_avg_loss), "Средняя оценка"],
+            ["Время восстановления", f"до {max_recovery_days} дней", "После инцидента"],
+            ["ROI устранения", f"{(total_avg_loss / max(50000, 1)):.0f}x", "Окупаемость инвестиций"],
+        ]
+        
+        metrics_table = Table(metrics_data, colWidths=[5*cm, 4*cm, 6*cm])
+        metrics_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#DC2626")),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('ALIGN', (1, 1), (1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, -1), self._font_name),
+            ('FONTSIZE', (0, 0), (-1, 0), 11),
+            ('FONTSIZE', (0, 1), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor("#FEF2F2")),
+            ('GRID', (0, 0), (-1, -1), 1, colors.HexColor("#FECACA")),
+            ('FONTNAME', (1, 1), (1, -1), self._font_name),
+            ('TEXTCOLOR', (1, 1), (1, 5), colors.HexColor("#DC2626")),
+        ]))
+        story.append(metrics_table)
+        
+        story.append(Spacer(1, 0.8*cm))
+        
+        # Impact by severity
+        story.append(Paragraph("<b>Потенциальные последствия по категориям</b>", self._styles['VulnTitle']))
+        story.append(Spacer(1, 0.3*cm))
+        
+        impact_data = [["Критичность", "Кол-во", "Потери", "Восстановление", "Репутация"]]
+        
+        for severity in ["critical", "high", "medium", "low"]:
+            count = stats.get(severity, 0)
+            if count > 0:
+                impact = BUSINESS_IMPACT[severity]
+                impact_data.append([
+                    SEVERITY_LABELS_RU[severity],
+                    str(count),
+                    f"{fmt_currency(impact['avg_loss'] * count)}",
+                    f"{impact['recovery_days']} дн.",
+                    impact["reputation_impact"],
+                ])
+        
+        if len(impact_data) > 1:
+            impact_table = Table(impact_data, colWidths=[3.5*cm, 2*cm, 3*cm, 3*cm, 3.5*cm])
+            
+            # Color rows by severity
+            table_style = [
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#1E40AF")),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, -1), self._font_name),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                ('TOPPADDING', (0, 0), (-1, -1), 6),
+                ('GRID', (0, 0), (-1, -1), 1, colors.HexColor("#CBD5E1")),
+            ]
+            
+            # Add row colors based on severity
+            row_idx = 1
+            for severity in ["critical", "high", "medium", "low"]:
+                if stats.get(severity, 0) > 0:
+                    bg_colors = {
+                        "critical": "#FEE2E2",
+                        "high": "#FFEDD5",
+                        "medium": "#FEF9C3",
+                        "low": "#DBEAFE",
+                    }
+                    table_style.append(('BACKGROUND', (0, row_idx), (-1, row_idx), colors.HexColor(bg_colors[severity])))
+                    row_idx += 1
+            
+            impact_table.setStyle(TableStyle(table_style))
+            story.append(impact_table)
+        
+        story.append(Spacer(1, 0.8*cm))
+        
+        # Risk scenarios
+        story.append(Paragraph("<b>Сценарии реализации угроз</b>", self._styles['VulnTitle']))
+        story.append(Spacer(1, 0.2*cm))
+        
+        scenarios = []
+        if stats.get("critical", 0) > 0:
+            scenarios.append(
+                "• <b>Критический сценарий:</b> Злоумышленник получает полный контроль над системой, "
+                "похищает базу данных клиентов, требует выкуп. Потери: судебные иски, штрафы регуляторов, "
+                "потеря клиентов, простой бизнеса."
+            )
+        if stats.get("high", 0) > 0:
+            scenarios.append(
+                "• <b>Высокий риск:</b> Компрометация учётных записей пользователей, утечка персональных данных. "
+                "Штраф GDPR до 4% годового оборота, уведомление пострадавших, репутационный ущерб."
+            )
+        if stats.get("medium", 0) > 0:
+            scenarios.append(
+                "• <b>Средний риск:</b> Атаки на пользователей через XSS/CSRF, фишинг от имени компании. "
+                "Потеря доверия клиентов, затраты на расследование и устранение."
+            )
+        
+        if not scenarios:
+            scenarios.append(
+                "• Текущий уровень безопасности не выявил критических угроз для бизнеса. "
+                "Рекомендуется поддерживать регулярный мониторинг."
+            )
+        
+        for scenario in scenarios:
+            story.append(Paragraph(scenario, self._styles['CustomBody']))
+        
+        story.append(Spacer(1, 0.5*cm))
+        
+        # Compliance risks
+        story.append(Paragraph("<b>Риски несоответствия требованиям</b>", self._styles['VulnTitle']))
+        
+        compliance_text = """
+        Обнаруженные уязвимости могут привести к нарушению следующих стандартов:<br/>
+        • <b>GDPR</b> — штраф до €20M или 4% годового оборота<br/>
+        • <b>PCI DSS</b> — штрафы $5K-$100K/месяц, отзыв права обработки карт<br/>
+        • <b>152-ФЗ</b> — штраф до 18M руб., блокировка сайта<br/>
+        • <b>ISO 27001</b> — потеря сертификации, репутационный ущерб
+        """
+        story.append(Paragraph(compliance_text, self._styles['CustomBody']))
         
         return story
 
