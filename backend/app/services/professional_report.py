@@ -446,10 +446,10 @@ class ProfessionalReportGenerator:
         
         story.append(Paragraph("ВИЗУАЛИЗАЦИЯ РЕЗУЛЬТАТОВ", self._styles['SectionTitle']))
         
-        # Pie chart
+        # Pie chart - square aspect ratio
         pie_chart = self._create_severity_pie_chart(stats)
         if pie_chart:
-            story.append(Image(pie_chart, width=14*cm, height=10*cm))
+            story.append(Image(pie_chart, width=12*cm, height=12*cm))
         
         story.append(Spacer(1, 1*cm))
         
@@ -457,7 +457,7 @@ class ProfessionalReportGenerator:
         if stats["by_type"]:
             bar_chart = self._create_type_bar_chart(stats["by_type"])
             if bar_chart:
-                story.append(Image(bar_chart, width=14*cm, height=8*cm))
+                story.append(Image(bar_chart, width=16*cm, height=10*cm))
         
         return story
 
@@ -482,7 +482,8 @@ class ProfessionalReportGenerator:
             plt.rcParams['font.family'] = ['DejaVu Sans', 'sans-serif']
             plt.rcParams['font.size'] = 11
             
-            fig, ax = plt.subplots(figsize=(10, 8), facecolor='#0F172A')
+            # Square figure to avoid stretching
+            fig, ax = plt.subplots(figsize=(8, 8), facecolor='#0F172A')
             ax.set_facecolor('#0F172A')
             
             # Donut chart with shadow effect
@@ -506,24 +507,27 @@ class ProfessionalReportGenerator:
             
             for text in texts:
                 text.set_color('white')
-                text.set_fontsize(10)
+                text.set_fontsize(11)
             
             # Center circle for donut effect
             centre_circle = plt.Circle((0, 0), 0.35, fc='#0F172A', ec='#334155', linewidth=2)
             ax.add_patch(centre_circle)
             
-            # Title with glow effect
-            ax.set_title('Распределение уязвимостей\nпо критичности', 
-                        fontsize=16, fontweight='bold', color='white', pad=20)
+            # Title
+            ax.set_title('Распределение уязвимостей по критичности', 
+                        fontsize=14, fontweight='bold', color='white', pad=15)
             
             # Add total in center
             ax.text(0, 0, f'{stats["total"]}\nвсего', ha='center', va='center',
-                   fontsize=20, fontweight='bold', color='white')
+                   fontsize=18, fontweight='bold', color='white')
+            
+            # Keep aspect ratio equal (circle, not ellipse)
+            ax.set_aspect('equal')
             
             plt.tight_layout()
             
             buf = io.BytesIO()
-            plt.savefig(buf, format='png', dpi=200, bbox_inches='tight', 
+            plt.savefig(buf, format='png', dpi=150, bbox_inches='tight', 
                        facecolor='#0F172A', edgecolor='none')
             plt.close(fig)
             buf.seek(0)
@@ -542,12 +546,12 @@ class ProfessionalReportGenerator:
             if not sorted_types:
                 return None
             
-            # Shorten labels
+            # Shorten labels but keep readable
             labels = []
             for t in sorted_types:
                 label = t[0].replace('_', ' ').replace('-', ' ')
-                if len(label) > 25:
-                    label = label[:22] + '...'
+                if len(label) > 30:
+                    label = label[:27] + '...'
                 labels.append(label)
             values = [t[1] for t in sorted_types]
             
@@ -555,28 +559,28 @@ class ProfessionalReportGenerator:
             plt.style.use('seaborn-v0_8-whitegrid')
             plt.rcParams['font.family'] = ['DejaVu Sans', 'sans-serif']
             
-            fig, ax = plt.subplots(figsize=(12, 7), facecolor='#0F172A')
+            fig, ax = plt.subplots(figsize=(14, 8), facecolor='#0F172A')
             ax.set_facecolor('#0F172A')
             
             # Gradient colors from blue to purple
             n = len(values)
             gradient_colors = [plt.cm.cool(i/n) for i in range(n)]
             
-            # Horizontal bars with rounded edges effect
+            # Horizontal bars
             bars = ax.barh(range(len(labels)), values, color=gradient_colors, 
                           edgecolor='#334155', linewidth=1, height=0.7)
             
-            # Add value labels with glow
+            # Add value labels
             for i, (bar, value) in enumerate(zip(bars, values)):
                 ax.text(bar.get_width() + 0.3, bar.get_y() + bar.get_height()/2,
-                       str(value), va='center', fontsize=11, fontweight='bold',
+                       str(value), va='center', fontsize=12, fontweight='bold',
                        color='white')
             
-            # Style axes
+            # Style axes - BIGGER FONT for labels
             ax.set_yticks(range(len(labels)))
-            ax.set_yticklabels(labels, fontsize=10, color='white')
-            ax.set_xlabel('Количество', fontsize=12, color='white', fontweight='bold')
-            ax.tick_params(axis='x', colors='white')
+            ax.set_yticklabels(labels, fontsize=12, color='white', fontweight='bold')
+            ax.set_xlabel('Количество', fontsize=14, color='white', fontweight='bold')
+            ax.tick_params(axis='x', colors='white', labelsize=11)
             ax.tick_params(axis='y', colors='white')
             
             # Remove spines and add subtle grid
@@ -585,13 +589,14 @@ class ProfessionalReportGenerator:
             ax.grid(axis='x', color='#334155', linestyle='--', alpha=0.3)
             
             # Title
-            ax.set_title('Топ-10 типов уязвимостей', fontsize=16, fontweight='bold', 
+            ax.set_title('Топ-10 типов уязвимостей', fontsize=18, fontweight='bold', 
                         color='white', pad=20)
             
-            plt.tight_layout()
+            # Add more space on the left for labels
+            plt.subplots_adjust(left=0.35)
             
             buf = io.BytesIO()
-            plt.savefig(buf, format='png', dpi=200, bbox_inches='tight',
+            plt.savefig(buf, format='png', dpi=150, bbox_inches='tight',
                        facecolor='#0F172A', edgecolor='none')
             plt.close(fig)
             buf.seek(0)
@@ -647,9 +652,11 @@ class ProfessionalReportGenerator:
                 ))
             
             if vuln.remediation:
-                remediation = self._clean_text(vuln.remediation[:300])
+                remediation = self._clean_text(vuln.remediation[:500])
+                # Split numbered recommendations into separate lines
+                remediation = self._format_numbered_list(remediation)
                 story.append(Paragraph(
-                    f"<b>Рекомендация:</b> {remediation}",
+                    f"<b>Рекомендация:</b><br/>{remediation}",
                     self._styles['CustomBody']
                 ))
             
@@ -670,6 +677,17 @@ class ProfessionalReportGenerator:
         # Remove excessive whitespace
         text = ' '.join(text.split())
         return text
+    
+    def _format_numbered_list(self, text: str) -> str:
+        """Форматирует нумерованный список с переносами строк."""
+        import re
+        # Pattern: "1. text 2. text" -> "1. text<br/>2. text"
+        # Match number followed by dot and space
+        formatted = re.sub(r'\s+(\d+)\.\s+', r'<br/>\1. ', text)
+        # Remove leading <br/> if present
+        if formatted.startswith('<br/>'):
+            formatted = formatted[5:]
+        return formatted
 
     def _create_recommendations_section(
         self,
