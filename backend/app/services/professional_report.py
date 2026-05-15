@@ -1224,6 +1224,23 @@ class ProfessionalReportGenerator:
         text = ' '.join(text.split())
         return text
     
+    def _clean_command(self, text: str) -> str:
+        """Очищает команду от непечатаемых символов для PDF."""
+        if not text:
+            return ""
+        # Keep only printable ASCII and basic Cyrillic
+        import re
+        # Remove emojis and special unicode
+        text = re.sub(r'[^\x20-\x7E\u0400-\u04FF\u0020-\u007F]', '', text)
+        # Remove markdown
+        text = text.replace('**', '').replace('`', '').replace('*', '')
+        # Escape HTML special chars
+        text = text.replace('&', '&amp;')
+        text = text.replace('<', '&lt;').replace('>', '&gt;')
+        # Clean whitespace
+        text = ' '.join(text.split())
+        return text.strip()
+    
     def _format_numbered_list(self, text: str) -> str:
         """Форматирует нумерованный список с переносами строк."""
         import re
@@ -1597,11 +1614,12 @@ class ProfessionalReportGenerator:
                     if commands and isinstance(commands, list):
                         story.append(Paragraph("<b>Команды:</b>", self._styles['CustomBody']))
                         for cmd in commands[:5]:
-                            cmd_clean = self._clean_text(cmd)
-                            story.append(Paragraph(
-                                f"<font face='Courier' size='9'>{cmd_clean}</font>",
-                                self._styles['CustomBody']
-                            ))
+                            cmd_clean = self._clean_command(cmd)
+                            if cmd_clean:
+                                story.append(Paragraph(
+                                    f"<font face='{self._font_name}' size='9' color='#1E40AF'><b>{cmd_clean}</b></font>",
+                                    self._styles['CustomBody']
+                                ))
                     
                     # Timeline and responsible
                     if timeline or responsible:
