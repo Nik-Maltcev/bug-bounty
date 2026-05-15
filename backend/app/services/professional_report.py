@@ -23,6 +23,7 @@ from typing import Any
 import matplotlib
 matplotlib.use('Agg')  # Non-interactive backend for server
 import matplotlib.pyplot as plt
+from matplotlib import font_manager
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -33,6 +34,8 @@ from reportlab.platypus import (
     Image, PageBreak
 )
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 from sqlalchemy.orm import Session
 
@@ -40,6 +43,37 @@ from app.models.database import VulnerabilityRecord, Scan
 from app.models.database import Asset as AssetDB
 
 logger = logging.getLogger(__name__)
+
+# Регистрируем шрифт с поддержкой кириллицы
+_FONT_REGISTERED = False
+
+def _register_cyrillic_font():
+    """Регистрирует шрифт DejaVu с поддержкой кириллицы."""
+    global _FONT_REGISTERED
+    if _FONT_REGISTERED:
+        return
+    
+    # Пути к шрифтам DejaVu (обычно есть в Linux)
+    font_paths = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "C:/Windows/Fonts/arial.ttf",  # Windows fallback
+    ]
+    
+    for font_path in font_paths:
+        if os.path.exists(font_path):
+            try:
+                pdfmetrics.registerFont(TTFont('DejaVu', font_path))
+                logger.info("Registered Cyrillic font: %s", font_path)
+                _FONT_REGISTERED = True
+                return
+            except Exception as e:
+                logger.warning("Failed to register font %s: %s", font_path, e)
+    
+    logger.warning("No Cyrillic font found, using Helvetica (no Cyrillic support)")
+    _FONT_REGISTERED = True
+
 
 # Цвета для severity
 SEVERITY_COLORS = {
@@ -51,36 +85,12 @@ SEVERITY_COLORS = {
 }
 
 SEVERITY_LABELS_RU = {
-    "critical": "Critical",
-    "high": "High",
-    "medium": "Medium",
-    "low": "Low",
-    "informational": "Info",
+    "critical": "Критические",
+    "high": "Высокие",
+    "medium": "Средние",
+    "low": "Низкие",
+    "informational": "Информационные",
 }
-
-# Транслитерация для PDF (Helvetica не поддерживает кириллицу)
-TRANSLIT_MAP = {
-    "Критические": "Critical", "Высокие": "High", "Средние": "Medium",
-    "Низкие": "Low", "Информационные": "Info",
-    "уязвимостей": "vulnerabilities", "уязвимости": "vulnerabilities",
-    "Уязвимость": "Vulnerability", "Описание": "Description",
-    "Рекомендации": "Recommendations", "Отчёт": "Report",
-    "Клиент": "Client", "Цель": "Target", "Дата": "Date",
-    "Всего": "Total", "Критических": "Critical", "Высоких": "High",
-    "Средних": "Medium", "Низких": "Low",
-}
-
-
-def transliterate(text: str) -> str:
-    """Заменяет кириллицу на латиницу для PDF."""
-    if not text:
-        return ""
-    result = str(text)
-    for ru, en in TRANSLIT_MAP.items():
-        result = result.replace(ru, en)
-    # Удаляем оставшуюся кириллицу
-    result = ''.join(c if ord(c) < 128 else '?' for c in result)
-    return result
 
 
 class ProfessionalReportGenerator:
@@ -88,12 +98,15 @@ class ProfessionalReportGenerator:
 
     def __init__(self, db: Session):
         self.db = db
+        _register_cyrillic_font()
+        self._font_name = 'DejaVu' if _FONT_REGISTERED else 'Helvetica'
         self._styles = getSampleStyleSheet()
         self._setup_styles()
 
     def _setup_styles(self):
-        """Настройка стилей для PDF."""
-        # Проверяем существование стилей перед добавлением
+        """Настройка стилей для PDF с кириллицей."""
+        font = self._font_name
+        
         if 'ReportTitle' not in self._styles.byName:
             self._styles.add(ParagraphStyle(
                 name='ReportTitle',
@@ -102,7 +115,7 @@ class ProfessionalReportGenerator:
                 alignment=TA_CENTER,
                 spaceAfter=20,
                 textColor=colors.HexColor("#1E293B"),
-                fontName='Helvetica-Bold',
+                fontName=font,
             ))
         
         if 'SectionTitle' not in self._styles.byName:
@@ -113,10 +126,9 @@ class ProfessionalReportGenerator:
                 spaceBefore=20,
                 spaceAfter=10,
                 textColor=colors.HexColor("#1E40AF"),
-                fontName='Helvetica-Bold',
+                fontName=font,
             ))
         
-        # BodyText уже существует в стандартных стилях, используем CustomBody
         if 'CustomBody' not in self._styles.byName:
             self._styles.add(ParagraphStyle(
                 name='CustomBody',
@@ -125,6 +137,7 @@ class ProfessionalReportGenerator:
                 alignment=TA_JUSTIFY,
                 spaceAfter=8,
                 textColor=colors.HexColor("#374151"),
+                fontName=font,
             ))
         
         if 'VulnTitle' not in self._styles.byName:
@@ -135,47 +148,38 @@ class ProfessionalReportGenerator:
                 spaceBefore=15,
                 spaceAfter=5,
                 textColor=colors.HexColor("#1E293B"),
-                fontName='Helvetica-Bold',
+                fontName=font,
             ))
 
     def generate_report(
         self,
         scan_id: str,
-        company_name: str = "Client",
+        company_name: str = "Клиент",
         include_executive_summary: bool = True,
         use_ai_descriptions: bool = True,
     ) -> bytes:
         """Генерирует профессиональный PDF-отчёт."""
         logger.info("Generating professional report for scan %s", scan_id)
         
-        # Получаем данные сканирования
         scan = self.db.query(Scan).filter(Scan.id == scan_id).first()
         if not scan:
             raise ValueError(f"Scan {scan_id} not found")
         
-        # Получаем URL цели
-        target_url = "Unknown"
-        if scan.asset_id:
-            asset = self.db.query(AssetDB).filter(AssetDB.id == scan.asset_id).first()
-            if asset:
-                target_url = asset.target or "Unknown"
+        asset = self.db.query(AssetDB).filter(AssetDB.id == scan.asset_id).first()
+        target_url = asset.target if asset else "Unknown"
         
-        # Получаем уязвимости
         vulns = self.db.query(VulnerabilityRecord).filter(
             VulnerabilityRecord.scan_id == scan_id
         ).all()
         
-        logger.info("Found %d vulnerabilities for report", len(vulns))
-        
-        # Статистика
         stats = self._calculate_stats(vulns)
         
-        # Генерируем AI-описания если нужно
+        # AI Summary
         ai_summary = None
         if use_ai_descriptions:
             ai_summary = self._generate_ai_summary(vulns, target_url, company_name)
         
-        # Создаём PDF
+        # Create PDF
         buffer = io.BytesIO()
         doc = SimpleDocTemplate(
             buffer,
@@ -188,7 +192,7 @@ class ProfessionalReportGenerator:
         
         story = []
         
-        # Титульная страница
+        # Title page
         story.extend(self._create_title_page(company_name, target_url, scan, stats))
         story.append(PageBreak())
         
@@ -197,31 +201,27 @@ class ProfessionalReportGenerator:
             story.extend(self._create_executive_summary(stats, ai_summary, company_name))
             story.append(PageBreak())
         
-        # Графики
-        try:
-            story.extend(self._create_charts_section(stats))
-            story.append(PageBreak())
-        except Exception as e:
-            logger.warning("Failed to create charts: %s", e)
+        # Charts
+        story.extend(self._create_charts_section(stats))
+        story.append(PageBreak())
         
-        # Детальные уязвимости
+        # Vulnerabilities
         story.extend(self._create_vulnerabilities_section(vulns))
         
-        # Рекомендации
+        # Recommendations
         story.append(PageBreak())
         story.extend(self._create_recommendations_section(vulns, ai_summary))
         
-        # Собираем PDF
         doc.build(story)
         
         pdf_bytes = buffer.getvalue()
         buffer.close()
         
-        logger.info("Report generated successfully, size: %d bytes", len(pdf_bytes))
+        logger.info("Report generated: %d bytes", len(pdf_bytes))
         return pdf_bytes
 
     def _calculate_stats(self, vulns: list[VulnerabilityRecord]) -> dict:
-        """Подсчёт статистики уязвимостей."""
+        """Подсчёт статистики."""
         stats = {
             "total": len(vulns),
             "critical": 0,
@@ -233,7 +233,7 @@ class ProfessionalReportGenerator:
         }
         
         for v in vulns:
-            severity = (v.severity or "informational").lower()
+            severity = v.severity.lower() if v.severity else "informational"
             if severity in stats:
                 stats[severity] += 1
             
@@ -250,7 +250,7 @@ class ProfessionalReportGenerator:
         target_url: str,
         company_name: str,
     ) -> dict | None:
-        """Генерирует AI-описания через DeepSeek."""
+        """Генерирует AI-описания через DeepSeek V4 Pro."""
         api_key = os.environ.get("DEEPSEEK_API_KEY")
         if not api_key:
             logger.warning("DEEPSEEK_API_KEY not set, skipping AI summary")
@@ -259,28 +259,27 @@ class ProfessionalReportGenerator:
         try:
             import httpx
             
-            # Формируем список уязвимостей для AI
             vuln_list = []
             for v in vulns[:20]:
                 vuln_list.append({
                     "type": v.vulnerability_type,
                     "severity": v.severity,
-                    "description": (v.description or "")[:200],
+                    "description": v.description[:200] if v.description else "",
                 })
             
-            prompt = f"""You are a cybersecurity expert. Create a professional security report summary.
+            prompt = f"""Ты — эксперт по кибербезопасности. Создай профессиональный отчёт для клиента НА РУССКОМ ЯЗЫКЕ.
 
-Target: {target_url}
-Company: {company_name}
-Vulnerabilities found: {json.dumps(vuln_list, ensure_ascii=False)}
+Цель: {target_url}
+Компания: {company_name}
+Найденные уязвимости: {json.dumps(vuln_list, ensure_ascii=False)}
 
-Generate JSON with fields:
-1. "executive_summary" - brief summary for executives (2-3 paragraphs in English)
-2. "risk_assessment" - business risk assessment (what could happen if not fixed)
-3. "priority_actions" - list of 5 priority actions
-4. "overall_score" - security score from 1 to 10 (10 = excellent)
+Сгенерируй JSON с полями (ВСЕ ТЕКСТЫ НА РУССКОМ):
+1. "executive_summary" — краткое резюме для руководства (2-3 абзаца на русском)
+2. "risk_assessment" — оценка бизнес-рисков на русском (что может произойти если не исправить)
+3. "priority_actions" — список из 5 приоритетных действий на русском
+4. "overall_score" — оценка безопасности от 1 до 10 (10 = отлично)
 
-Reply ONLY with valid JSON, no markdown."""
+Отвечай ТОЛЬКО валидным JSON без markdown."""
 
             response = httpx.post(
                 "https://api.deepseek.com/chat/completions",
@@ -300,12 +299,7 @@ Reply ONLY with valid JSON, no markdown."""
             if response.status_code == 200:
                 data = response.json()
                 content = data["choices"][0]["message"]["content"]
-                # Убираем markdown если есть
-                if "```" in content:
-                    content = content.split("```")[1]
-                    if content.startswith("json"):
-                        content = content[4:]
-                return json.loads(content.strip())
+                return json.loads(content)
             else:
                 logger.error("DeepSeek API error: %s", response.text)
                 return None
@@ -326,39 +320,35 @@ Reply ONLY with valid JSON, no markdown."""
         
         story.append(Spacer(1, 3*cm))
         story.append(Paragraph(
-            "SECURITY ASSESSMENT<br/>REPORT",
+            "ОТЧЁТ О ТЕСТИРОВАНИИ<br/>БЕЗОПАСНОСТИ",
             self._styles['ReportTitle']
         ))
         
         story.append(Spacer(1, 1*cm))
         
         story.append(Paragraph(
-            f"<b>Client:</b> {transliterate(company_name)}",
+            f"<b>Клиент:</b> {company_name}",
             self._styles['CustomBody']
         ))
         story.append(Paragraph(
-            f"<b>Target:</b> {target_url}",
+            f"<b>Цель тестирования:</b> {target_url}",
             self._styles['CustomBody']
         ))
-        
-        scan_date = "N/A"
-        if scan.started_at:
-            scan_date = scan.started_at.strftime('%Y-%m-%d %H:%M')
         story.append(Paragraph(
-            f"<b>Scan Date:</b> {scan_date}",
+            f"<b>Дата сканирования:</b> {scan.started_at.strftime('%d.%m.%Y %H:%M') if scan.started_at else 'N/A'}",
             self._styles['CustomBody']
         ))
         
         story.append(Spacer(1, 2*cm))
         
-        # Краткая статистика
+        # Summary table
         summary_data = [
-            ["Metric", "Count"],
-            ["Total Vulnerabilities", str(stats["total"])],
-            ["Critical", str(stats["critical"])],
-            ["High", str(stats["high"])],
-            ["Medium", str(stats["medium"])],
-            ["Low", str(stats["low"])],
+            ["Показатель", "Значение"],
+            ["Всего уязвимостей", str(stats["total"])],
+            ["Критических", str(stats["critical"])],
+            ["Высоких", str(stats["high"])],
+            ["Средних", str(stats["medium"])],
+            ["Низких", str(stats["low"])],
         ]
         
         summary_table = Table(summary_data, colWidths=[8*cm, 4*cm])
@@ -366,7 +356,7 @@ Reply ONLY with valid JSON, no markdown."""
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#1E40AF")),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTNAME', (0, 0), (-1, -1), self._font_name),
             ('FONTSIZE', (0, 0), (-1, -1), 11),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
             ('TOPPADDING', (0, 0), (-1, -1), 10),
@@ -379,14 +369,15 @@ Reply ONLY with valid JSON, no markdown."""
         story.append(Spacer(1, 3*cm))
         
         story.append(Paragraph(
-            "<b>CONFIDENTIAL</b><br/>"
-            "This report contains confidential information and is intended "
-            "for internal use only.",
+            "<b>КОНФИДЕНЦИАЛЬНО</b><br/>"
+            "Данный отчёт содержит конфиденциальную информацию и предназначен "
+            "исключительно для внутреннего использования.",
             ParagraphStyle(
                 'Confidential',
                 fontSize=9,
                 alignment=TA_CENTER,
                 textColor=colors.HexColor("#DC2626"),
+                fontName=self._font_name,
             )
         ))
         
@@ -401,49 +392,47 @@ Reply ONLY with valid JSON, no markdown."""
         """Создаёт Executive Summary."""
         story = []
         
-        story.append(Paragraph("EXECUTIVE SUMMARY", self._styles['SectionTitle']))
+        story.append(Paragraph("РЕЗЮМЕ ДЛЯ РУКОВОДСТВА", self._styles['SectionTitle']))
         
         if ai_summary and "executive_summary" in ai_summary:
-            text = transliterate(ai_summary["executive_summary"])
-            story.append(Paragraph(text, self._styles['CustomBody']))
+            story.append(Paragraph(ai_summary["executive_summary"], self._styles['CustomBody']))
         else:
             critical_high = stats["critical"] + stats["high"]
-            risk_level = "HIGH" if critical_high > 0 else "MEDIUM" if stats["medium"] > 0 else "LOW"
+            risk_level = "ВЫСОКИЙ" if critical_high > 0 else "СРЕДНИЙ" if stats["medium"] > 0 else "НИЗКИЙ"
             
             summary_text = f"""
-            During the security assessment, <b>{stats['total']}</b> vulnerabilities were discovered,
-            including <b>{stats['critical']}</b> critical and <b>{stats['high']}</b> high severity issues.
-            
-            The overall risk level is assessed as <b>{risk_level}</b>.
-            
-            It is recommended to immediately address critical and high severity vulnerabilities
-            to prevent potential security incidents.
+            В ходе тестирования безопасности было обнаружено <b>{stats['total']}</b> уязвимостей, 
+            из которых <b>{stats['critical']}</b> критических и <b>{stats['high']}</b> высокой степени серьёзности.
+            <br/><br/>
+            Общий уровень риска оценивается как <b>{risk_level}</b>.
+            <br/><br/>
+            Рекомендуется незамедлительно устранить критические и высокие уязвимости для 
+            предотвращения потенциальных инцидентов безопасности.
             """
             story.append(Paragraph(summary_text, self._styles['CustomBody']))
         
-        # Risk Assessment
+        # Risk assessment
         story.append(Spacer(1, 0.5*cm))
-        story.append(Paragraph("Risk Assessment", self._styles['VulnTitle']))
+        story.append(Paragraph("Оценка бизнес-рисков", self._styles['VulnTitle']))
         
         if ai_summary and "risk_assessment" in ai_summary:
-            text = transliterate(ai_summary["risk_assessment"])
-            story.append(Paragraph(text, self._styles['CustomBody']))
+            story.append(Paragraph(ai_summary["risk_assessment"], self._styles['CustomBody']))
         else:
             risk_text = """
-            The discovered vulnerabilities may lead to:
-            - Unauthorized access to confidential data
-            - Compromise of user accounts
-            - Financial losses and reputational damage
-            - Regulatory compliance violations (GDPR, PCI-DSS)
+            Обнаруженные уязвимости могут привести к:<br/>
+            • Несанкционированному доступу к конфиденциальным данным<br/>
+            • Компрометации учётных записей пользователей<br/>
+            • Финансовым потерям и репутационному ущербу<br/>
+            • Нарушению требований регуляторов (GDPR, 152-ФЗ)
             """
             story.append(Paragraph(risk_text, self._styles['CustomBody']))
         
-        # Security Score
+        # Score
         if ai_summary and "overall_score" in ai_summary:
             score = ai_summary["overall_score"]
             story.append(Spacer(1, 0.5*cm))
             story.append(Paragraph(
-                f"<b>Security Score: {score}/10</b>",
+                f"<b>Оценка безопасности: {score}/10</b>",
                 self._styles['VulnTitle']
             ))
         
@@ -453,7 +442,7 @@ Reply ONLY with valid JSON, no markdown."""
         """Создаёт секцию с графиками."""
         story = []
         
-        story.append(Paragraph("VULNERABILITY DISTRIBUTION", self._styles['SectionTitle']))
+        story.append(Paragraph("ВИЗУАЛИЗАЦИЯ РЕЗУЛЬТАТОВ", self._styles['SectionTitle']))
         
         # Pie chart
         pie_chart = self._create_severity_pie_chart(stats)
@@ -471,7 +460,7 @@ Reply ONLY with valid JSON, no markdown."""
         return story
 
     def _create_severity_pie_chart(self, stats: dict) -> io.BytesIO | None:
-        """Создаёт pie chart распределения по severity."""
+        """Создаёт pie chart."""
         try:
             labels = []
             sizes = []
@@ -486,6 +475,9 @@ Reply ONLY with valid JSON, no markdown."""
             if not sizes:
                 return None
             
+            # Use font that supports Cyrillic
+            plt.rcParams['font.family'] = ['DejaVu Sans', 'sans-serif']
+            
             fig, ax = plt.subplots(figsize=(8, 6))
             
             wedges, texts, autotexts = ax.pie(
@@ -497,7 +489,7 @@ Reply ONLY with valid JSON, no markdown."""
                 explode=[0.02] * len(sizes),
             )
             
-            ax.set_title('Vulnerability Distribution by Severity', fontsize=14, fontweight='bold')
+            ax.set_title('Распределение уязвимостей по критичности', fontsize=14, fontweight='bold')
             
             for autotext in autotexts:
                 autotext.set_color('white')
@@ -517,7 +509,7 @@ Reply ONLY with valid JSON, no markdown."""
             return None
 
     def _create_type_bar_chart(self, by_type: dict) -> io.BytesIO | None:
-        """Создаёт bar chart по типам уязвимостей."""
+        """Создаёт bar chart по типам."""
         try:
             sorted_types = sorted(by_type.items(), key=lambda x: x[1], reverse=True)[:10]
             
@@ -527,12 +519,14 @@ Reply ONLY with valid JSON, no markdown."""
             labels = [t[0][:30] for t in sorted_types]
             values = [t[1] for t in sorted_types]
             
+            plt.rcParams['font.family'] = ['DejaVu Sans', 'sans-serif']
+            
             fig, ax = plt.subplots(figsize=(10, 6))
             
             bars = ax.barh(labels, values, color='#3B82F6')
             
-            ax.set_xlabel('Count')
-            ax.set_title('Top 10 Vulnerability Types', fontsize=14, fontweight='bold')
+            ax.set_xlabel('Количество')
+            ax.set_title('Топ-10 типов уязвимостей', fontsize=14, fontweight='bold')
             
             for bar, value in zip(bars, values):
                 ax.text(bar.get_width() + 0.1, bar.get_y() + bar.get_height()/2,
@@ -552,58 +546,53 @@ Reply ONLY with valid JSON, no markdown."""
             return None
 
     def _create_vulnerabilities_section(self, vulns: list[VulnerabilityRecord]) -> list:
-        """Создаёт секцию с детальными уязвимостями."""
+        """Создаёт секцию с уязвимостями."""
         story = []
         
-        story.append(Paragraph("DETAILED FINDINGS", self._styles['SectionTitle']))
+        story.append(Paragraph("ДЕТАЛЬНОЕ ОПИСАНИЕ УЯЗВИМОСТЕЙ", self._styles['SectionTitle']))
         
-        # Сортируем по severity
         severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "informational": 4}
         sorted_vulns = sorted(
             vulns,
-            key=lambda v: severity_order.get((v.severity or "informational").lower(), 5)
+            key=lambda v: severity_order.get(v.severity.lower() if v.severity else "informational", 5)
         )
         
         for i, vuln in enumerate(sorted_vulns[:30], 1):
-            severity = (vuln.severity or "informational").lower()
+            severity = vuln.severity.lower() if vuln.severity else "informational"
             severity_color = SEVERITY_COLORS.get(severity, "#6B7280")
             severity_label = SEVERITY_LABELS_RU.get(severity, severity.upper())
             
-            # Заголовок уязвимости
             story.append(Paragraph(
-                f"{i}. [{severity_label.upper()}] {transliterate(vuln.vulnerability_type or 'Unknown')}",
+                f"{i}. [{severity_label.upper()}] {vuln.vulnerability_type or 'Unknown'}",
                 ParagraphStyle(
-                    'VulnHeader',
+                    f'VulnHeader_{i}',
                     fontSize=11,
                     leading=14,
                     spaceBefore=15,
                     spaceAfter=5,
                     textColor=colors.HexColor(severity_color),
-                    fontName='Helvetica-Bold',
+                    fontName=self._font_name,
                 )
             ))
             
-            # Описание
             if vuln.description:
-                desc = transliterate(vuln.description[:500])
+                desc = vuln.description[:500].replace('<', '&lt;').replace('>', '&gt;')
                 story.append(Paragraph(
-                    f"<b>Description:</b> {desc}",
+                    f"<b>Описание:</b> {desc}",
                     self._styles['CustomBody']
                 ))
             
-            # Evidence
             if vuln.evidence:
-                evidence = transliterate(vuln.evidence[:300])
+                evidence = vuln.evidence[:300].replace('<', '&lt;').replace('>', '&gt;')
                 story.append(Paragraph(
-                    f"<b>Evidence:</b> {evidence}",
+                    f"<b>Доказательство:</b> {evidence}",
                     self._styles['CustomBody']
                 ))
             
-            # Remediation
             if vuln.remediation:
-                remediation = transliterate(vuln.remediation[:300])
+                remediation = vuln.remediation[:300].replace('<', '&lt;').replace('>', '&gt;')
                 story.append(Paragraph(
-                    f"<b>Remediation:</b> {remediation}",
+                    f"<b>Рекомендация:</b> {remediation}",
                     self._styles['CustomBody']
                 ))
             
@@ -619,31 +608,30 @@ Reply ONLY with valid JSON, no markdown."""
         """Создаёт секцию с рекомендациями."""
         story = []
         
-        story.append(Paragraph("RECOMMENDATIONS", self._styles['SectionTitle']))
+        story.append(Paragraph("РЕКОМЕНДАЦИИ ПО УСТРАНЕНИЮ", self._styles['SectionTitle']))
         
         if ai_summary and "priority_actions" in ai_summary:
             story.append(Paragraph(
-                "<b>Priority Actions:</b>",
+                "<b>Приоритетные действия:</b>",
                 self._styles['VulnTitle']
             ))
             
             actions = ai_summary["priority_actions"]
             if isinstance(actions, list):
                 for i, action in enumerate(actions, 1):
-                    text = transliterate(str(action))
                     story.append(Paragraph(
-                        f"{i}. {text}",
+                        f"{i}. {action}",
                         self._styles['CustomBody']
                     ))
         else:
             recommendations = [
-                "Immediately fix all critical vulnerabilities",
-                "Conduct web server configuration audit",
-                "Update all components to latest versions",
-                "Implement WAF (Web Application Firewall)",
-                "Set up security monitoring",
-                "Train developers on secure coding practices",
-                "Conduct regular penetration testing",
+                "Немедленно устранить все критические уязвимости",
+                "Провести аудит конфигурации веб-сервера",
+                "Обновить все компоненты до последних версий",
+                "Внедрить WAF (Web Application Firewall)",
+                "Настроить мониторинг безопасности",
+                "Провести обучение разработчиков по безопасному кодированию",
+                "Регулярно проводить тестирование на проникновение",
             ]
             
             for i, rec in enumerate(recommendations, 1):
@@ -654,16 +642,15 @@ Reply ONLY with valid JSON, no markdown."""
         
         story.append(Spacer(1, 1*cm))
         
-        # Заключение
-        story.append(Paragraph("CONCLUSION", self._styles['SectionTitle']))
+        story.append(Paragraph("ЗАКЛЮЧЕНИЕ", self._styles['SectionTitle']))
         story.append(Paragraph(
             """
-            This report contains the results of automated security testing.
-            For a complete security assessment, additional manual penetration
-            testing is recommended.
-            
-            For questions about the test results, please contact the
-            information security specialists.
+            Данный отчёт содержит результаты автоматизированного тестирования безопасности.
+            Для полной оценки защищённости рекомендуется провести дополнительное ручное 
+            тестирование на проникновение.
+            <br/><br/>
+            При возникновении вопросов по результатам тестирования обращайтесь к специалистам
+            по информационной безопасности.
             """,
             self._styles['CustomBody']
         ))

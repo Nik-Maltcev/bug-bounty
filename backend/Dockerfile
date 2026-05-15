@@ -1,10 +1,11 @@
 FROM python:3.12-slim
 
-# System tools + Ruby for whatweb/wpscan + Perl modules for nikto
+# System tools + Ruby for whatweb/wpscan + Perl modules for nikto + fonts for PDF
 RUN apt-get update && apt-get install -y --no-install-recommends \
     nmap curl git perl libnet-ssleay-perl libjson-perl \
     ruby ruby-dev build-essential libcurl4-openssl-dev libxml2 libxml2-dev libxslt1-dev zlib1g-dev \
     unzip wget \
+    fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 # nikto (from git — not in Debian Trixie repos)
