@@ -48,28 +48,55 @@ logger = logging.getLogger(__name__)
 _FONT_REGISTERED = False
 
 def _register_cyrillic_font():
-    """Регистрирует шрифт DejaVu с поддержкой кириллицы."""
+    """Регистрирует шрифты с поддержкой кириллицы."""
     global _FONT_REGISTERED
     if _FONT_REGISTERED:
         return
     
-    # Пути к шрифтам DejaVu (обычно есть в Linux)
-    font_paths = [
+    # Montserrat - modern, clean font
+    montserrat_paths = [
+        "/usr/share/fonts/truetype/montserrat/Montserrat-Regular.ttf",
+        "/usr/share/fonts/truetype/montserrat/Montserrat-Bold.ttf",
+    ]
+    
+    # DejaVu - fallback
+    dejavu_paths = [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/TTF/DejaVuSans.ttf",
-        "C:/Windows/Fonts/arial.ttf",  # Windows fallback
     ]
     
-    for font_path in font_paths:
+    # Try Montserrat first
+    if os.path.exists(montserrat_paths[0]):
+        try:
+            pdfmetrics.registerFont(TTFont('Montserrat', montserrat_paths[0]))
+            if os.path.exists(montserrat_paths[1]):
+                pdfmetrics.registerFont(TTFont('Montserrat-Bold', montserrat_paths[1]))
+            logger.info("Registered Montserrat font")
+            _FONT_REGISTERED = True
+            return
+        except Exception as e:
+            logger.warning("Failed to register Montserrat: %s", e)
+    
+    # Fallback to DejaVu
+    for font_path in dejavu_paths:
         if os.path.exists(font_path):
             try:
                 pdfmetrics.registerFont(TTFont('DejaVu', font_path))
-                logger.info("Registered Cyrillic font: %s", font_path)
+                logger.info("Registered DejaVu font: %s", font_path)
                 _FONT_REGISTERED = True
                 return
             except Exception as e:
                 logger.warning("Failed to register font %s: %s", font_path, e)
+    
+    # Windows fallback
+    if os.path.exists("C:/Windows/Fonts/arial.ttf"):
+        try:
+            pdfmetrics.registerFont(TTFont('DejaVu', "C:/Windows/Fonts/arial.ttf"))
+            _FONT_REGISTERED = True
+            return
+        except:
+            pass
     
     logger.warning("No Cyrillic font found, using Helvetica (no Cyrillic support)")
     _FONT_REGISTERED = True
@@ -199,7 +226,13 @@ class ProfessionalReportGenerator:
     def __init__(self, db: Session):
         self.db = db
         _register_cyrillic_font()
-        self._font_name = 'DejaVu' if _FONT_REGISTERED else 'Helvetica'
+        # Use Montserrat if available, otherwise DejaVu
+        if os.path.exists("/usr/share/fonts/truetype/montserrat/Montserrat-Regular.ttf"):
+            self._font_name = 'Montserrat'
+        elif _FONT_REGISTERED:
+            self._font_name = 'DejaVu'
+        else:
+            self._font_name = 'Helvetica'
         self._styles = getSampleStyleSheet()
         self._setup_styles()
 

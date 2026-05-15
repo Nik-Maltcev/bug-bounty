@@ -4,9 +4,15 @@ FROM python:3.12-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     nmap curl git perl libnet-ssleay-perl libjson-perl \
     ruby ruby-dev build-essential libcurl4-openssl-dev libxml2 libxml2-dev libxslt1-dev zlib1g-dev \
-    unzip wget \
+    unzip wget fontconfig \
     fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Montserrat font from Google Fonts
+RUN mkdir -p /usr/share/fonts/truetype/montserrat \
+    && curl -sSL "https://github.com/JulietaUla/Montserrat/raw/master/fonts/ttf/Montserrat-Regular.ttf" -o /usr/share/fonts/truetype/montserrat/Montserrat-Regular.ttf \
+    && curl -sSL "https://github.com/JulietaUla/Montserrat/raw/master/fonts/ttf/Montserrat-Bold.ttf" -o /usr/share/fonts/truetype/montserrat/Montserrat-Bold.ttf \
+    && fc-cache -fv
 
 # nikto (from git — not in Debian Trixie repos)
 # Requires additional perl modules for full functionality
