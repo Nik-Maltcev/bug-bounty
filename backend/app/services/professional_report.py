@@ -395,7 +395,8 @@ class ProfessionalReportGenerator:
         story.append(Paragraph("РЕЗЮМЕ ДЛЯ РУКОВОДСТВА", self._styles['SectionTitle']))
         
         if ai_summary and "executive_summary" in ai_summary:
-            story.append(Paragraph(ai_summary["executive_summary"], self._styles['CustomBody']))
+            clean_summary = self._clean_text(ai_summary["executive_summary"])
+            story.append(Paragraph(clean_summary, self._styles['CustomBody']))
         else:
             critical_high = stats["critical"] + stats["high"]
             risk_level = "ВЫСОКИЙ" if critical_high > 0 else "СРЕДНИЙ" if stats["medium"] > 0 else "НИЗКИЙ"
@@ -416,7 +417,8 @@ class ProfessionalReportGenerator:
         story.append(Paragraph("Оценка бизнес-рисков", self._styles['VulnTitle']))
         
         if ai_summary and "risk_assessment" in ai_summary:
-            story.append(Paragraph(ai_summary["risk_assessment"], self._styles['CustomBody']))
+            clean_risk = self._clean_text(ai_summary["risk_assessment"])
+            story.append(Paragraph(clean_risk, self._styles['CustomBody']))
         else:
             risk_text = """
             Обнаруженные уязвимости могут привести к:<br/>
@@ -460,7 +462,7 @@ class ProfessionalReportGenerator:
         return story
 
     def _create_severity_pie_chart(self, stats: dict) -> io.BytesIO | None:
-        """Создаёт pie chart."""
+        """Создаёт премиум pie chart с градиентами."""
         try:
             labels = []
             sizes = []
@@ -468,37 +470,61 @@ class ProfessionalReportGenerator:
             
             for severity in ["critical", "high", "medium", "low", "informational"]:
                 if stats[severity] > 0:
-                    labels.append(f"{SEVERITY_LABELS_RU[severity]} ({stats[severity]})")
+                    labels.append(f"{SEVERITY_LABELS_RU[severity]}\n({stats[severity]})")
                     sizes.append(stats[severity])
                     colors_list.append(SEVERITY_COLORS[severity])
             
             if not sizes:
                 return None
             
-            # Use font that supports Cyrillic
+            # Premium style
+            plt.style.use('seaborn-v0_8-whitegrid')
             plt.rcParams['font.family'] = ['DejaVu Sans', 'sans-serif']
+            plt.rcParams['font.size'] = 11
             
-            fig, ax = plt.subplots(figsize=(8, 6))
+            fig, ax = plt.subplots(figsize=(10, 8), facecolor='#0F172A')
+            ax.set_facecolor('#0F172A')
             
+            # Donut chart with shadow effect
             wedges, texts, autotexts = ax.pie(
                 sizes,
                 labels=labels,
                 colors=colors_list,
                 autopct='%1.1f%%',
                 startangle=90,
-                explode=[0.02] * len(sizes),
+                explode=[0.03] * len(sizes),
+                shadow=True,
+                wedgeprops=dict(width=0.6, edgecolor='#1E293B', linewidth=2),
+                textprops=dict(color='white', fontweight='bold'),
             )
             
-            ax.set_title('Распределение уязвимостей по критичности', fontsize=14, fontweight='bold')
-            
+            # Style autotexts
             for autotext in autotexts:
                 autotext.set_color('white')
                 autotext.set_fontweight('bold')
+                autotext.set_fontsize(12)
+            
+            for text in texts:
+                text.set_color('white')
+                text.set_fontsize(10)
+            
+            # Center circle for donut effect
+            centre_circle = plt.Circle((0, 0), 0.35, fc='#0F172A', ec='#334155', linewidth=2)
+            ax.add_patch(centre_circle)
+            
+            # Title with glow effect
+            ax.set_title('Распределение уязвимостей\nпо критичности', 
+                        fontsize=16, fontweight='bold', color='white', pad=20)
+            
+            # Add total in center
+            ax.text(0, 0, f'{stats["total"]}\nвсего', ha='center', va='center',
+                   fontsize=20, fontweight='bold', color='white')
             
             plt.tight_layout()
             
             buf = io.BytesIO()
-            plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+            plt.savefig(buf, format='png', dpi=200, bbox_inches='tight', 
+                       facecolor='#0F172A', edgecolor='none')
             plt.close(fig)
             buf.seek(0)
             
@@ -509,33 +535,64 @@ class ProfessionalReportGenerator:
             return None
 
     def _create_type_bar_chart(self, by_type: dict) -> io.BytesIO | None:
-        """Создаёт bar chart по типам."""
+        """Создаёт премиум bar chart с градиентами."""
         try:
             sorted_types = sorted(by_type.items(), key=lambda x: x[1], reverse=True)[:10]
             
             if not sorted_types:
                 return None
             
-            labels = [t[0][:30] for t in sorted_types]
+            # Shorten labels
+            labels = []
+            for t in sorted_types:
+                label = t[0].replace('_', ' ').replace('-', ' ')
+                if len(label) > 25:
+                    label = label[:22] + '...'
+                labels.append(label)
             values = [t[1] for t in sorted_types]
             
+            # Premium style
+            plt.style.use('seaborn-v0_8-whitegrid')
             plt.rcParams['font.family'] = ['DejaVu Sans', 'sans-serif']
             
-            fig, ax = plt.subplots(figsize=(10, 6))
+            fig, ax = plt.subplots(figsize=(12, 7), facecolor='#0F172A')
+            ax.set_facecolor('#0F172A')
             
-            bars = ax.barh(labels, values, color='#3B82F6')
+            # Gradient colors from blue to purple
+            n = len(values)
+            gradient_colors = [plt.cm.cool(i/n) for i in range(n)]
             
-            ax.set_xlabel('Количество')
-            ax.set_title('Топ-10 типов уязвимостей', fontsize=14, fontweight='bold')
+            # Horizontal bars with rounded edges effect
+            bars = ax.barh(range(len(labels)), values, color=gradient_colors, 
+                          edgecolor='#334155', linewidth=1, height=0.7)
             
-            for bar, value in zip(bars, values):
-                ax.text(bar.get_width() + 0.1, bar.get_y() + bar.get_height()/2,
-                       str(value), va='center', fontsize=10)
+            # Add value labels with glow
+            for i, (bar, value) in enumerate(zip(bars, values)):
+                ax.text(bar.get_width() + 0.3, bar.get_y() + bar.get_height()/2,
+                       str(value), va='center', fontsize=11, fontweight='bold',
+                       color='white')
+            
+            # Style axes
+            ax.set_yticks(range(len(labels)))
+            ax.set_yticklabels(labels, fontsize=10, color='white')
+            ax.set_xlabel('Количество', fontsize=12, color='white', fontweight='bold')
+            ax.tick_params(axis='x', colors='white')
+            ax.tick_params(axis='y', colors='white')
+            
+            # Remove spines and add subtle grid
+            for spine in ax.spines.values():
+                spine.set_color('#334155')
+            ax.grid(axis='x', color='#334155', linestyle='--', alpha=0.3)
+            
+            # Title
+            ax.set_title('Топ-10 типов уязвимостей', fontsize=16, fontweight='bold', 
+                        color='white', pad=20)
             
             plt.tight_layout()
             
             buf = io.BytesIO()
-            plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+            plt.savefig(buf, format='png', dpi=200, bbox_inches='tight',
+                       facecolor='#0F172A', edgecolor='none')
             plt.close(fig)
             buf.seek(0)
             
@@ -576,21 +633,21 @@ class ProfessionalReportGenerator:
             ))
             
             if vuln.description:
-                desc = vuln.description[:500].replace('<', '&lt;').replace('>', '&gt;')
+                desc = self._clean_text(vuln.description[:500])
                 story.append(Paragraph(
                     f"<b>Описание:</b> {desc}",
                     self._styles['CustomBody']
                 ))
             
             if vuln.evidence:
-                evidence = vuln.evidence[:300].replace('<', '&lt;').replace('>', '&gt;')
+                evidence = self._clean_text(vuln.evidence[:300])
                 story.append(Paragraph(
                     f"<b>Доказательство:</b> {evidence}",
                     self._styles['CustomBody']
                 ))
             
             if vuln.remediation:
-                remediation = vuln.remediation[:300].replace('<', '&lt;').replace('>', '&gt;')
+                remediation = self._clean_text(vuln.remediation[:300])
                 story.append(Paragraph(
                     f"<b>Рекомендация:</b> {remediation}",
                     self._styles['CustomBody']
@@ -599,6 +656,20 @@ class ProfessionalReportGenerator:
             story.append(Spacer(1, 0.3*cm))
         
         return story
+    
+    def _clean_text(self, text: str) -> str:
+        """Очищает текст от markdown и спецсимволов для PDF."""
+        if not text:
+            return ""
+        # Remove markdown bold/italic
+        text = text.replace('**', '').replace('__', '')
+        text = text.replace('*', '').replace('_', ' ')
+        # Escape HTML special chars (& must be first!)
+        text = text.replace('&', '&amp;')
+        text = text.replace('<', '&lt;').replace('>', '&gt;')
+        # Remove excessive whitespace
+        text = ' '.join(text.split())
+        return text
 
     def _create_recommendations_section(
         self,
@@ -619,8 +690,9 @@ class ProfessionalReportGenerator:
             actions = ai_summary["priority_actions"]
             if isinstance(actions, list):
                 for i, action in enumerate(actions, 1):
+                    clean_action = self._clean_text(action)
                     story.append(Paragraph(
-                        f"{i}. {action}",
+                        f"{i}. {clean_action}",
                         self._styles['CustomBody']
                     ))
         else:
