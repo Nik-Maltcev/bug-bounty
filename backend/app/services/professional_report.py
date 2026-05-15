@@ -952,13 +952,20 @@ class ProfessionalReportGenerator:
             key=lambda v: severity_order.get(v.severity.lower() if v.severity else "informational", 5)
         )
         
-        for i, vuln in enumerate(sorted_vulns[:30], 1):
+        # Translate descriptions in batch for efficiency
+        vulns_to_show = sorted_vulns[:30]
+        translations = self._translate_vulnerabilities(vulns_to_show)
+        
+        for i, vuln in enumerate(vulns_to_show, 1):
             severity = vuln.severity.lower() if vuln.severity else "informational"
             severity_color = SEVERITY_COLORS.get(severity, "#6B7280")
             severity_label = SEVERITY_LABELS_RU.get(severity, severity.upper())
             
+            # Get translated content or fallback to original
+            trans = translations.get(vuln.id, {})
+            
             story.append(Paragraph(
-                f"{i}. [{severity_label.upper()}] {vuln.vulnerability_type or 'Unknown'}",
+                f"{i}. [{severity_label.upper()}] {trans.get('title', vuln.vulnerability_type or 'Unknown')}",
                 ParagraphStyle(
                     f'VulnHeader_{i}',
                     fontSize=11,
@@ -971,7 +978,8 @@ class ProfessionalReportGenerator:
             ))
             
             if vuln.description:
-                desc = self._clean_text(vuln.description[:500])
+                desc = trans.get('description', vuln.description[:500])
+                desc = self._clean_text(desc)
                 story.append(Paragraph(
                     f"<b>Описание:</b> {desc}",
                     self._styles['CustomBody']
@@ -985,8 +993,8 @@ class ProfessionalReportGenerator:
                 ))
             
             if vuln.remediation:
-                remediation = self._clean_text(vuln.remediation[:500])
-                # Split numbered recommendations into separate lines
+                remediation = trans.get('remediation', vuln.remediation[:500])
+                remediation = self._clean_text(remediation)
                 remediation = self._format_numbered_list(remediation)
                 story.append(Paragraph(
                     f"<b>Рекомендация:</b><br/>{remediation}",
@@ -994,6 +1002,79 @@ class ProfessionalReportGenerator:
                 ))
             
             story.append(Spacer(1, 0.3*cm))
+        
+        return story
+    
+    def _translate_vulnerabilities(self, vulns: list[VulnerabilityRecord]) -> dict:
+        """Переводит описания уязвимостей на русский через DeepSeek."""
+        api_key = os.environ.get("DEEPSEEK_API_KEY")
+        if not api_key:
+            logger.warning("DEEPSEEK_API_KEY not set, skipping translation")
+            return {}
+        
+        # Prepare data for translation
+        to_translate = []
+        for v in vulns:
+            to_translate.append({
+                "id": str(v.id),
+                "title": v.vulnerability_type or "",
+                "description": (v.description or "")[:400],
+                "remediation": (v.remediation or "")[:400],
+            })
+        
+        if not to_translate:
+            return {}
+        
+        try:
+            import httpx
+            
+            prompt = f"""Переведи на русский язык описания уязвимостей. Сохрани технические термины.
+Верни JSON массив с теми же id и переведёнными полями title, description, remediation.
+
+Входные данные:
+{json.dumps(to_translate, ensure_ascii=False)}
+
+Отвечай ТОЛЬКО валидным JSON массивом без markdown."""
+
+            response = httpx.post(
+                "https://api.deepseek.com/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "deepseek-chat",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.2,
+                    "max_tokens": 4000,
+                },
+                timeout=90.0,
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                content = data["choices"][0]["message"]["content"]
+                # Clean markdown if present
+                content = content.strip()
+                if content.startswith("```"):
+                    content = content.split("\n", 1)[1]
+                if content.endswith("```"):
+                    content = content.rsplit("```", 1)[0]
+                
+                translated = json.loads(content)
+                # Convert to dict by id
+                result = {}
+                for item in translated:
+                    result[item["id"]] = item
+                logger.info("Translated %d vulnerabilities", len(result))
+                return result
+            else:
+                logger.error("DeepSeek translation error: %s", response.text)
+                return {}
+                
+        except Exception as e:
+            logger.exception("Failed to translate vulnerabilities: %s", e)
+            return {}
         
         return story
     
