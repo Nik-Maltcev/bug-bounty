@@ -92,38 +92,38 @@ SEVERITY_LABELS_RU = {
     "informational": "Информационные",
 }
 
-# Бизнес-метрики для оценки потерь (в USD)
+# Бизнес-метрики для оценки потерь (в рублях)
 BUSINESS_IMPACT = {
     "critical": {
-        "min_loss": 500000,
-        "max_loss": 5000000,
-        "avg_loss": 1500000,
+        "min_loss": 50000000,
+        "max_loss": 500000000,
+        "avg_loss": 150000000,
         "recovery_days": 30,
         "reputation_impact": "Катастрофический",
         "examples": [
             "Полная компрометация базы данных клиентов",
-            "Утечка платёжных данных (PCI DSS нарушение)",
+            "Утечка платёжных данных (нарушение PCI DSS)",
             "Удалённое выполнение кода на сервере",
             "Полный захват инфраструктуры",
         ],
     },
     "high": {
-        "min_loss": 100000,
-        "max_loss": 500000,
-        "avg_loss": 250000,
+        "min_loss": 10000000,
+        "max_loss": 50000000,
+        "avg_loss": 25000000,
         "recovery_days": 14,
         "reputation_impact": "Серьёзный",
         "examples": [
             "Несанкционированный доступ к аккаунтам",
-            "Утечка персональных данных (GDPR штраф)",
+            "Утечка персональных данных (штраф по 152-ФЗ)",
             "SQL-инъекция с доступом к данным",
             "Обход аутентификации",
         ],
     },
     "medium": {
-        "min_loss": 10000,
-        "max_loss": 100000,
-        "avg_loss": 50000,
+        "min_loss": 1000000,
+        "max_loss": 10000000,
+        "avg_loss": 5000000,
         "recovery_days": 7,
         "reputation_impact": "Умеренный",
         "examples": [
@@ -134,9 +134,9 @@ BUSINESS_IMPACT = {
         ],
     },
     "low": {
-        "min_loss": 1000,
-        "max_loss": 10000,
-        "avg_loss": 5000,
+        "min_loss": 100000,
+        "max_loss": 1000000,
+        "avg_loss": 500000,
         "recovery_days": 3,
         "reputation_impact": "Минимальный",
         "examples": [
@@ -147,8 +147,8 @@ BUSINESS_IMPACT = {
     },
     "informational": {
         "min_loss": 0,
-        "max_loss": 1000,
-        "avg_loss": 500,
+        "max_loss": 100000,
+        "avg_loss": 50000,
         "recovery_days": 1,
         "reputation_impact": "Отсутствует",
         "examples": [
@@ -531,14 +531,16 @@ class ProfessionalReportGenerator:
                 total_avg_loss += impact["avg_loss"] * count
                 max_recovery_days = max(max_recovery_days, impact["recovery_days"])
         
-        # Format currency
+        # Format currency in rubles
         def fmt_currency(val):
-            if val >= 1000000:
-                return f"${val/1000000:.1f}M"
+            if val >= 1000000000:
+                return f"{val/1000000000:.1f} млрд ₽"
+            elif val >= 1000000:
+                return f"{val/1000000:.0f} млн ₽"
             elif val >= 1000:
-                return f"${val/1000:.0f}K"
+                return f"{val/1000:.0f} тыс ₽"
             else:
-                return f"${val:.0f}"
+                return f"{val:.0f} ₽"
         
         # Key metrics table
         story.append(Paragraph("<b>Ключевые финансовые показатели</b>", self._styles['VulnTitle']))
@@ -550,7 +552,7 @@ class ProfessionalReportGenerator:
             ["Максимальные потери", fmt_currency(total_max_loss), "При отсутствии мер"],
             ["Ожидаемые потери", fmt_currency(total_avg_loss), "Средняя оценка"],
             ["Время восстановления", f"до {max_recovery_days} дней", "После инцидента"],
-            ["ROI устранения", f"{(total_avg_loss / max(50000, 1)):.0f}x", "Окупаемость инвестиций"],
+            ["ROI устранения", f"{(total_avg_loss / max(5000000, 1)):.0f}x", "Окупаемость инвестиций"],
         ]
         
         metrics_table = Table(metrics_data, colWidths=[5*cm, 4*cm, 6*cm])
@@ -632,13 +634,13 @@ class ProfessionalReportGenerator:
         if stats.get("critical", 0) > 0:
             scenarios.append(
                 "• <b>Критический сценарий:</b> Злоумышленник получает полный контроль над системой, "
-                "похищает базу данных клиентов, требует выкуп. Потери: судебные иски, штрафы регуляторов, "
-                "потеря клиентов, простой бизнеса."
+                "похищает базу данных клиентов, требует выкуп. Потери: судебные иски, штрафы Роскомнадзора, "
+                "потеря клиентов, простой бизнеса до 30 дней."
             )
         if stats.get("high", 0) > 0:
             scenarios.append(
                 "• <b>Высокий риск:</b> Компрометация учётных записей пользователей, утечка персональных данных. "
-                "Штраф GDPR до 4% годового оборота, уведомление пострадавших, репутационный ущерб."
+                "Штраф по 152-ФЗ до 18 млн руб., уведомление Роскомнадзора в течение 24 часов, репутационный ущерб."
             )
         if stats.get("medium", 0) > 0:
             scenarios.append(
@@ -657,15 +659,16 @@ class ProfessionalReportGenerator:
         
         story.append(Spacer(1, 0.5*cm))
         
-        # Compliance risks
-        story.append(Paragraph("<b>Риски несоответствия требованиям</b>", self._styles['VulnTitle']))
+        # Compliance risks - Russian legislation
+        story.append(Paragraph("<b>Риски несоответствия требованиям законодательства РФ</b>", self._styles['VulnTitle']))
         
         compliance_text = """
-        Обнаруженные уязвимости могут привести к нарушению следующих стандартов:<br/>
-        • <b>GDPR</b> — штраф до €20M или 4% годового оборота<br/>
-        • <b>PCI DSS</b> — штрафы $5K-$100K/месяц, отзыв права обработки карт<br/>
-        • <b>152-ФЗ</b> — штраф до 18M руб., блокировка сайта<br/>
-        • <b>ISO 27001</b> — потеря сертификации, репутационный ущерб
+        Обнаруженные уязвимости могут привести к нарушению следующих требований:<br/>
+        • <b>152-ФЗ «О персональных данных»</b> — штраф до 18 млн руб., блокировка сайта Роскомнадзором<br/>
+        • <b>187-ФЗ «О КИИ»</b> — уголовная ответственность до 10 лет для объектов КИИ<br/>
+        • <b>PCI DSS</b> — штрафы 500 тыс - 10 млн руб./месяц, отзыв права обработки карт<br/>
+        • <b>ГОСТ Р 57580</b> — предписания ЦБ РФ для финансовых организаций<br/>
+        • <b>Приказ ФСТЭК №21</b> — требования к защите ИСПДн, проверки регулятора
         """
         story.append(Paragraph(compliance_text, self._styles['CustomBody']))
         
