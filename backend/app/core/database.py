@@ -35,6 +35,38 @@ def init_db() -> None:
     Существующие таблицы не затрагиваются (CREATE IF NOT EXISTS).
     """
     Base.metadata.create_all(bind=engine)
+    
+    # Миграции для новых столбцов в существующих таблицах
+    _run_migrations()
+
+
+def _run_migrations() -> None:
+    """Добавляет новые столбцы в существующие таблицы (safe ALTER TABLE)."""
+    import sqlite3
+    
+    db_url = engine.url.render_as_string(hide_password=False)
+    if "sqlite" not in db_url:
+        return
+    
+    # Извлекаем путь к БД
+    db_path = db_url.replace("sqlite:///", "").replace("sqlite://", "")
+    if not db_path or db_path == ":memory:":
+        return
+    
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        # Добавляем category в scans если нет
+        cursor.execute("PRAGMA table_info(scans)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "category" not in columns:
+            cursor.execute("ALTER TABLE scans ADD COLUMN category TEXT DEFAULT ''")
+            conn.commit()
+        
+        conn.close()
+    except Exception:
+        pass  # Игнорируем ошибки миграции
 
 
 def get_db() -> Session:
