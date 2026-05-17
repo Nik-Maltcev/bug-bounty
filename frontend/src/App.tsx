@@ -13,6 +13,7 @@ import ScanReportPage from './pages/ScanReportPage';
 import VulnerabilitiesPage from './pages/VulnerabilitiesPage';
 import VulnerabilityDetailPage from './pages/VulnerabilityDetailPage';
 import ReportsPage from './pages/ReportsPage';
+import ReportEditPage from './pages/ReportEditPage';
 import AuditLogPage from './pages/AuditLogPage';
 import CompliancePage from './pages/CompliancePage';
 import ChatPage from './pages/ChatPage';
@@ -58,6 +59,7 @@ export default function App() {
           <Route path="vulnerabilities" element={<VulnerabilitiesPage />} />
           <Route path="vulnerabilities/:id" element={<VulnerabilityDetailPage />} />
           <Route path="reports" element={<ReportsPage />} />
+          <Route path="reports/:id" element={<ReportEditPage />} />
           <Route path="audit" element={<AuditLogPage />} />
           <Route path="compliance" element={<CompliancePage />} />
         </Route>

@@ -110,6 +110,7 @@ class Scan(Base):
     percent_complete: Mapped[int] = mapped_column(Integer, default=0)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    category: Mapped[str] = mapped_column(String, default="")  # отрасль: fintech, ecommerce, healthcare, government, general
 
     # Связи
     program: Mapped["Program"] = relationship(back_populates="scans")
@@ -297,6 +298,27 @@ class FindingAnalysisRecord(Base):
 
     # Связи
     vulnerability: Mapped["VulnerabilityRecord"] = relationship(back_populates="finding_analyses")
+
+
+class ScanReport(Base):
+    """Редактируемый AI-отчёт по скану."""
+
+    __tablename__ = "scan_reports"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    scan_id: Mapped[str] = mapped_column(String, ForeignKey("scans.id"), nullable=False)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    target_url: Mapped[str] = mapped_column(String, default="")
+    category: Mapped[str] = mapped_column(String, default="")  # отрасль
+    executive_summary: Mapped[str] = mapped_column(Text, default="")
+    findings_summary: Mapped[str] = mapped_column(Text, default="")  # JSON: список находок
+    risk_assessment: Mapped[str] = mapped_column(Text, default="")
+    compliance_notes: Mapped[str] = mapped_column(Text, default="")
+    recommendations: Mapped[str] = mapped_column(Text, default="")
+    conclusion: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String, default="draft")  # draft, final
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
 
 # =============================================================================

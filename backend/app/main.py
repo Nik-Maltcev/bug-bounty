@@ -24,6 +24,7 @@ from app.api.vulnerabilities import router as vulnerabilities_router
 from app.api.tools import router as tools_router
 from app.api.safety import router as safety_router
 from app.api.ai import router as ai_router
+from app.api.reports import router as reports_router
 from app.core.database import init_db
 from app.core.ai_exceptions import (
     InputTooLongError,
@@ -307,6 +308,7 @@ app.include_router(vulnerabilities_router)
 app.include_router(tools_router)
 app.include_router(safety_router)
 app.include_router(ai_router)
+app.include_router(reports_router)
 
 
 @app.on_event("startup")

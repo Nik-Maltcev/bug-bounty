@@ -108,10 +108,30 @@ export async function listProgramAssets(programId: string): Promise<Asset[]> {
 
 // --- Scans API ---
 
-export async function quickScan(targetUrl: string, scanType: string = 'web'): Promise<ScanProgress & { target_url: string }> {
+export async function quickScan(targetUrl: string, scanType: string = 'web', category: string = ''): Promise<ScanProgress & { target_url: string }> {
   const res = await api.post<ScanProgress & { target_url: string }>('/api/scans/quick', {
     target_url: targetUrl,
     scan_type: scanType,
+    category: category,
+  });
+  return res.data;
+}
+
+export interface BatchScanResponse {
+  total: number;
+  started: number;
+  failed: number;
+  scans: { scan_id: string; target_url: string; status: string }[];
+  errors: { url: string; error: string }[];
+  category: string;
+}
+
+export async function batchScan(targets: string[], category: string = '', scanType: string = 'web', autoAiAnalysis: boolean = true): Promise<BatchScanResponse> {
+  const res = await api.post<BatchScanResponse>('/api/scans/batch', {
+    targets,
+    category,
+    scan_type: scanType,
+    auto_ai_analysis: autoAiAnalysis,
   });
   return res.data;
 }
@@ -308,6 +328,50 @@ export async function exportReport(id: string, format: 'md' | 'pdf' = 'md'): Pro
   }
   const res = await api.get<string>(`/api/reports/${id}/export`, { params: { format: 'md' } });
   return res.data;
+}
+
+// --- Scan Reports API ---
+
+export interface ScanReportData {
+  id: string;
+  scan_id: string;
+  title: string;
+  target_url: string;
+  category: string;
+  executive_summary: string;
+  findings_summary: string;
+  risk_assessment: string;
+  compliance_notes: string;
+  recommendations: string;
+  conclusion: string;
+  status: string;
+  findings_count: number;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export async function listScanReports(): Promise<ScanReportData[]> {
+  const res = await api.get<ScanReportData[]>('/api/reports');
+  return res.data;
+}
+
+export async function getScanReport(id: string): Promise<ScanReportData> {
+  const res = await api.get<ScanReportData>(`/api/reports/${id}`);
+  return res.data;
+}
+
+export async function updateScanReport(id: string, data: Partial<ScanReportData>): Promise<ScanReportData> {
+  const res = await api.put<ScanReportData>(`/api/reports/${id}`, data);
+  return res.data;
+}
+
+export async function deleteScanReport(id: string): Promise<void> {
+  await api.delete(`/api/reports/${id}`);
+}
+
+export async function downloadScanReportPdf(id: string): Promise<Blob> {
+  const res = await api.post(`/api/reports/${id}/pdf`, {}, { responseType: 'blob' });
+  return res.data as Blob;
 }
 
 // --- Compliance API ---

@@ -12,9 +12,12 @@
 """
 
 import json
+import logging
 import uuid
 from datetime import datetime
 from urllib.parse import urlparse
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -80,6 +83,7 @@ def _scan_to_response(scan: Scan) -> dict:
         "completed_at": scan.completed_at.isoformat() if scan.completed_at else None,
         "findings_count": len(scan.vulnerabilities) if scan.vulnerabilities else 0,
         "target_url": scan.target_url if hasattr(scan, 'target_url') else None,
+        "category": scan.category if hasattr(scan, 'category') else "",
     }
 
 
@@ -87,6 +91,15 @@ class QuickScanRequest(BaseModel):
     """Запрос на быстрое сканирование по URL."""
     target_url: str
     scan_type: str = "web"  # web, api, full
+    category: str = ""  # отрасль клиента
+
+
+class BatchScanRequest(BaseModel):
+    """Запрос на пакетное сканирование списка сайтов."""
+    targets: list[str]  # список URL
+    category: str = ""  # отрасль для всех сканов
+    scan_type: str = "web"
+    auto_ai_analysis: bool = True  # автоматически запускать AI-анализ
 
 
 @router.post("/api/scans/quick", status_code=201)
@@ -155,6 +168,13 @@ def quick_scan(
 
     progress = _scanner.start_scan(asset, scan_config, compliance_manager, rules, db)
 
+    # Сохраняем категорию если указана
+    if body.category:
+        scan_record = db.query(Scan).filter(Scan.id == progress.scan_id).first()
+        if scan_record:
+            scan_record.category = body.category
+            db.commit()
+
     return {
         "scan_id": progress.scan_id,
         "status": progress.status.value,
@@ -162,6 +182,317 @@ def quick_scan(
         "percent_complete": progress.percent_complete,
         "findings_count": progress.findings_count,
         "target_url": target_url,
+    }
+
+
+def _run_ai_and_create_report(scan_id: str, category: str, db: Session):
+    """Запускает AI-анализ и создаёт редактируемый отчёт."""
+    import os
+    import httpx as httpx_client
+    
+    from app.models.database import ScanReport, VulnerabilityRecord
+    
+    logger.info("Starting AI analysis for scan %s", scan_id)
+    
+    # Получаем уязвимости скана
+    vulns = db.query(VulnerabilityRecord).filter(VulnerabilityRecord.scan_id == scan_id).all()
+    
+    if not vulns:
+        logger.info("No vulnerabilities found for scan %s, skipping AI report", scan_id)
+        return
+    
+    # Получаем скан и target
+    scan = db.query(Scan).filter(Scan.id == scan_id).first()
+    target_url = ""
+    if scan and scan.asset_id:
+        asset = db.query(AssetDB).filter(AssetDB.id == scan.asset_id).first()
+        if asset:
+            target_url = asset.target
+    
+    # Формируем данные для AI
+    vuln_summary = []
+    severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "informational": 0}
+    
+    for v in vulns:
+        severity_counts[v.severity] = severity_counts.get(v.severity, 0) + 1
+        vuln_summary.append(f"- [{v.severity.upper()}] {v.vulnerability_type}: {v.description[:200]}")
+    
+    vuln_text = "\n".join(vuln_summary[:30])  # Лимит для промпта
+    
+    # AI-генерация отчёта
+    api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+    if not api_key:
+        logger.warning("No DEEPSEEK_API_KEY, creating report without AI")
+        # Создаём отчёт без AI
+        report = ScanReport(
+            id=str(uuid.uuid4()),
+            scan_id=scan_id,
+            title=f"Отчёт: {target_url}",
+            target_url=target_url,
+            category=category,
+            executive_summary=f"Обнаружено {len(vulns)} уязвимостей.",
+            findings_summary=vuln_text,
+            risk_assessment="Требуется анализ.",
+            compliance_notes="",
+            recommendations="Требуется анализ.",
+            conclusion="",
+            status="draft",
+        )
+        db.add(report)
+        db.commit()
+        return
+    
+    prompt = f"""Ты — эксперт по кибербезопасности. Составь профессиональный отчёт на русском языке.
+
+Цель: {target_url}
+Отрасль: {category or 'общая'}
+Найдено уязвимостей: {len(vulns)} (критических: {severity_counts['critical']}, высоких: {severity_counts['high']}, средних: {severity_counts['medium']}, низких: {severity_counts['low']})
+
+Уязвимости:
+{vuln_text}
+
+Напиши отчёт в формате JSON:
+{{
+  "executive_summary": "Краткое резюме для руководства (3-5 предложений)",
+  "risk_assessment": "Оценка рисков для бизнеса с учётом отрасли, потенциальные потери в рублях",
+  "compliance_notes": "Нарушения 152-ФЗ, 187-ФЗ, PCI DSS если применимо",
+  "recommendations": "Конкретные рекомендации по исправлению (пошагово)",
+  "conclusion": "Заключение и общая оценка безопасности"
+}}
+
+Отвечай ТОЛЬКО JSON, без markdown."""
+
+    try:
+        response = httpx_client.post(
+            "https://api.deepseek.com/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": "deepseek-chat",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.3,
+                "max_tokens": 3000,
+            },
+            timeout=120.0,
+        )
+        
+        import json
+        ai_text = response.json()["choices"][0]["message"]["content"]
+        # Убираем markdown обёртку если есть
+        ai_text = ai_text.strip()
+        if ai_text.startswith("```"):
+            ai_text = ai_text.split("\n", 1)[1] if "\n" in ai_text else ai_text[3:]
+            if ai_text.endswith("```"):
+                ai_text = ai_text[:-3]
+        
+        ai_data = json.loads(ai_text)
+        
+        report = ScanReport(
+            id=str(uuid.uuid4()),
+            scan_id=scan_id,
+            title=f"Отчёт: {target_url}",
+            target_url=target_url,
+            category=category,
+            executive_summary=ai_data.get("executive_summary", ""),
+            findings_summary=vuln_text,
+            risk_assessment=ai_data.get("risk_assessment", ""),
+            compliance_notes=ai_data.get("compliance_notes", ""),
+            recommendations=ai_data.get("recommendations", ""),
+            conclusion=ai_data.get("conclusion", ""),
+            status="draft",
+        )
+        db.add(report)
+        db.commit()
+        logger.info("AI report created for scan %s", scan_id)
+        
+    except Exception as e:
+        logger.error("AI report generation failed: %s", e)
+        # Создаём базовый отчёт без AI
+        report = ScanReport(
+            id=str(uuid.uuid4()),
+            scan_id=scan_id,
+            title=f"Отчёт: {target_url}",
+            target_url=target_url,
+            category=category,
+            executive_summary=f"Обнаружено {len(vulns)} уязвимостей. AI-анализ недоступен.",
+            findings_summary=vuln_text,
+            risk_assessment="",
+            compliance_notes="",
+            recommendations="",
+            conclusion="",
+            status="draft",
+        )
+        db.add(report)
+        db.commit()
+
+
+@router.post("/api/scans/batch", status_code=201)
+def batch_scan(
+    body: BatchScanRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Пакетное сканирование списка сайтов.
+    
+    Создаёт сканы в очереди и запускает их последовательно (один за другим).
+    """
+    import threading
+    
+    if not body.targets:
+        raise HTTPException(status_code=400, detail="Список сайтов пуст")
+    
+    if len(body.targets) > 300:
+        raise HTTPException(status_code=400, detail="Максимум 300 сайтов за раз")
+    
+    # Подготавливаем список валидных целей
+    valid_targets = []
+    errors = []
+    
+    for target_url in body.targets:
+        target_url = target_url.strip()
+        if not target_url:
+            continue
+            
+        # Добавляем https:// если нет схемы
+        if not target_url.startswith('http://') and not target_url.startswith('https://'):
+            target_url = 'https://' + target_url
+        
+        try:
+            parsed = urlparse(target_url)
+            if not parsed.scheme or not parsed.netloc:
+                errors.append({"url": target_url, "error": "Некорректный URL"})
+                continue
+            valid_targets.append({"url": target_url, "domain": parsed.netloc})
+        except Exception:
+            errors.append({"url": target_url, "error": "Некорректный URL"})
+            continue
+    
+    # Создаём все программы и активы, сканы в статусе pending
+    scan_queue = []
+    
+    for target in valid_targets:
+        program_id = str(uuid.uuid4())
+        program = Program(
+            id=program_id,
+            name=f"Batch Scan: {target['domain']}",
+            platform="batch_scan",
+            raw_text=f"Batch scan target: {target['url']}, category: {body.category}",
+            is_archived=False,
+        )
+        db.add(program)
+        
+        asset_id = str(uuid.uuid4())
+        asset_db = AssetDB(
+            id=asset_id,
+            program_id=program_id,
+            name=target['domain'],
+            asset_type="web_application",
+            target=target['url'],
+            in_scope=True,
+            notes=f"Batch scan, category: {body.category}",
+        )
+        db.add(asset_db)
+        
+        # Создаём скан в статусе pending (в очереди)
+        scan_id = str(uuid.uuid4())
+        scan_record = Scan(
+            id=scan_id,
+            program_id=program_id,
+            asset_id=asset_id,
+            status="queued",
+            current_stage="в очереди",
+            percent_complete=0,
+            category=body.category,
+        )
+        db.add(scan_record)
+        
+        scan_queue.append({
+            "scan_id": scan_id,
+            "program_id": program_id,
+            "asset_id": asset_id,
+            "target_url": target['url'],
+            "domain": target['domain'],
+        })
+    
+    db.commit()
+    
+    # Запускаем фоновый воркер для последовательного выполнения
+    def run_queue(queue, category, auto_ai):
+        """Последовательно запускает сканы из очереди."""
+        from app.core.database import SessionLocal
+        
+        for item in queue:
+            local_db = SessionLocal()
+            try:
+                # Обновляем статус на running
+                scan_rec = local_db.query(Scan).filter(Scan.id == item['scan_id']).first()
+                if not scan_rec:
+                    continue
+                
+                scan_rec.status = "running"
+                scan_rec.current_stage = "initializing"
+                scan_rec.started_at = datetime.now()
+                local_db.commit()
+                
+                # Создаём Asset schema
+                asset = Asset(
+                    id=item['asset_id'],
+                    name=item['domain'],
+                    asset_type=AssetType("web_application"),
+                    target=item['target_url'],
+                    in_scope=True,
+                    notes=f"Batch scan, category: {category}",
+                )
+                
+                scan_config = ScanConfig(
+                    asset_id=item['asset_id'],
+                    program_id=item['program_id'],
+                    check_types=[],
+                )
+                
+                compliance_manager = ComplianceManager()
+                rules = compliance_manager.load_program_rules(item['program_id'], local_db)
+                
+                # Запускаем скан (блокирующий — ждём завершения)
+                _scanner.start_scan(asset, scan_config, compliance_manager, rules, local_db)
+                
+                # После Stage 1 — запускаем AI-анализ если включено
+                if auto_ai:
+                    try:
+                        _run_ai_and_create_report(item['scan_id'], category, local_db)
+                    except Exception as e:
+                        logger.error("AI analysis failed for scan %s: %s", item['scan_id'], e)
+                
+            except Exception as e:
+                # Помечаем как failed
+                try:
+                    scan_rec = local_db.query(Scan).filter(Scan.id == item['scan_id']).first()
+                    if scan_rec:
+                        scan_rec.status = "failed"
+                        scan_rec.current_stage = f"error: {str(e)[:100]}"
+                        scan_rec.completed_at = datetime.now()
+                        local_db.commit()
+                except Exception:
+                    pass
+            finally:
+                local_db.close()
+    
+    # Запускаем в фоновом потоке
+    thread = threading.Thread(
+        target=run_queue,
+        args=(scan_queue, body.category, body.auto_ai_analysis),
+        daemon=True,
+    )
+    thread.start()
+    
+    results = [{"scan_id": s["scan_id"], "target_url": s["target_url"], "status": "queued"} for s in scan_queue]
+    
+    return {
+        "total": len(results) + len(errors),
+        "started": len(results),
+        "failed": len(errors),
+        "scans": results,
+        "errors": errors,
+        "category": body.category,
     }
 
 

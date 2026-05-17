@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { quickScan, listScans, getScanProgress, stopScan } from '../services/api';
+import { quickScan, listScans, getScanProgress, stopScan, batchScan } from '../services/api';
 import type { ScanRecord, ScanProgress } from '../types';
 import { 
   Search, 
@@ -14,7 +14,9 @@ import {
   ShieldAlert,
   RefreshCw,
   ExternalLink,
-  StopCircle
+  StopCircle,
+  Upload,
+  X
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -27,6 +29,14 @@ export default function ScansPage() {
   const [stopping, setStopping] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  
+  // Batch scan state
+  const [showBatchModal, setShowBatchModal] = useState(false);
+  const [batchTargets, setBatchTargets] = useState('');
+  const [batchCategory, setBatchCategory] = useState('');
+  const [batchAutoAI, setBatchAutoAI] = useState(true);
+  const [batchLoading, setBatchLoading] = useState(false);
+  const [batchResult, setBatchResult] = useState<{ started: number; failed: number; errors: { url: string; error: string }[] } | null>(null);
 
   // Load scan history
   useEffect(() => {
@@ -142,6 +152,8 @@ export default function ScansPage() {
         return <StopCircle className="w-5 h-5 text-orange-400" />;
       case 'running':
         return <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />;
+      case 'queued':
+        return <Clock className="w-5 h-5 text-purple-400" />;
       default:
         return <Clock className="w-5 h-5 text-slate-400" />;
     }
@@ -150,6 +162,7 @@ export default function ScansPage() {
   const getStatusLabel = (status: string) => {
     switch (status) {
       case 'pending': return 'В очереди';
+      case 'queued': return 'В очереди';
       case 'running': return 'Выполняется';
       case 'completed': return 'Завершено';
       case 'failed': return 'Ошибка';
@@ -175,13 +188,22 @@ export default function ScansPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold tracking-tight text-slate-100">Сканирования</h1>
-        <button 
-          onClick={loadScans}
-          className="flex items-center gap-2 px-3 py-1.5 text-sm text-slate-400 hover:text-white bg-slate-800 rounded-lg transition-colors"
+        <div className="flex items-center gap-2">
+          <button 
+            onClick={() => setShowBatchModal(true)}
+            className="flex items-center gap-2 px-3 py-1.5 text-sm text-slate-300 hover:text-white bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 rounded-lg transition-colors"
+          >
+            <Upload className="w-4 h-4" />
+            Загрузить список
+          </button>
+          <button 
+            onClick={loadScans}
+            className="flex items-center gap-2 px-3 py-1.5 text-sm text-slate-400 hover:text-white bg-slate-800 rounded-lg transition-colors"
         >
           <RefreshCw className="w-4 h-4" />
           Обновить
         </button>
+        </div>
       </div>
 
       {/* Scan Form */}
@@ -425,6 +447,7 @@ export default function ScansPage() {
                       scan.status === 'failed' ? "bg-red-500/10 text-red-400" :
                       scan.status === 'stopped' ? "bg-orange-500/10 text-orange-400" :
                       scan.status === 'running' ? "bg-blue-500/10 text-blue-400" :
+                      scan.status === 'queued' ? "bg-purple-500/10 text-purple-400" :
                       "bg-slate-500/10 text-slate-400"
                     )}>
                       {getStatusLabel(scan.status)}
@@ -458,6 +481,144 @@ export default function ScansPage() {
           </div>
         )}
       </section>
+      {/* Batch Scan Modal */}
+      {showBatchModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                <Upload className="w-5 h-5 text-blue-400" />
+                Пакетное сканирование
+              </h3>
+              <button onClick={() => { setShowBatchModal(false); setBatchResult(null); }} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {!batchResult ? (
+              <form onSubmit={async (e) => {
+                e.preventDefault();
+                const targets = batchTargets.split('\n').map(t => t.trim()).filter(t => t.length > 0);
+                if (targets.length === 0) return;
+                
+                setBatchLoading(true);
+                try {
+                  const result = await batchScan(targets, batchCategory, 'web', batchAutoAI);
+                  setBatchResult(result);
+                  loadScans();
+                } catch (err: unknown) {
+                  setBatchResult({ started: 0, failed: 1, errors: [{ url: 'all', error: (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Ошибка' }] });
+                } finally {
+                  setBatchLoading(false);
+                }
+              }} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                    Список сайтов (по одному на строку)
+                  </label>
+                  <textarea
+                    value={batchTargets}
+                    onChange={(e) => setBatchTargets(e.target.value)}
+                    placeholder={"example.com\nshop.example.ru\napi.company.com"}
+                    rows={8}
+                    className="block w-full px-4 py-3 border border-slate-600 rounded-xl bg-slate-800/50 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-mono text-sm"
+                    disabled={batchLoading}
+                  />
+                  <p className="text-xs text-slate-500 mt-1">
+                    {batchTargets.split('\n').filter(t => t.trim()).length} сайтов • макс. 300
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                    Категория / отрасль
+                  </label>
+                  <input
+                    type="text"
+                    value={batchCategory}
+                    onChange={(e) => setBatchCategory(e.target.value)}
+                    placeholder="Например: финтех, e-commerce, медицина, госсектор"
+                    className="block w-full px-4 py-3 border border-slate-600 rounded-xl bg-slate-800/50 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    disabled={batchLoading}
+                  />
+                  <p className="text-xs text-slate-500 mt-1">
+                    Используется для персонализации отчётов
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3 p-3 bg-slate-800/50 border border-slate-700 rounded-xl">
+                  <input
+                    type="checkbox"
+                    id="auto-ai"
+                    checked={batchAutoAI}
+                    onChange={(e) => setBatchAutoAI(e.target.checked)}
+                    className="w-4 h-4 text-blue-500 bg-slate-800 border-slate-600 rounded focus:ring-blue-500"
+                    disabled={batchLoading}
+                  />
+                  <label htmlFor="auto-ai" className="text-sm text-slate-300 cursor-pointer">
+                    <span className="font-medium">AI-анализ и отчёт</span>
+                    <span className="block text-xs text-slate-500">Автоматически запустить AI-анализ и создать отчёт после сканирования</span>
+                  </label>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={batchLoading || !batchTargets.trim()}
+                  className={clsx(
+                    "w-full flex justify-center items-center py-3 px-4 rounded-xl text-base font-bold text-white transition-all",
+                    batchLoading || !batchTargets.trim()
+                      ? "bg-slate-700 text-slate-400 cursor-not-allowed"
+                      : "bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-500/25"
+                  )}
+                >
+                  {batchLoading ? (
+                    <>
+                      <Loader2 className="animate-spin mr-2 h-5 w-5" />
+                      Запуск сканирований...
+                    </>
+                  ) : (
+                    <>
+                      <Play className="mr-2 h-5 w-5" />
+                      Запустить все ({batchTargets.split('\n').filter(t => t.trim()).length})
+                    </>
+                  )}
+                </button>
+              </form>
+            ) : (
+              <div className="space-y-4">
+                <div className="flex gap-4">
+                  <div className="flex-1 p-4 bg-green-500/10 border border-green-500/20 rounded-xl text-center">
+                    <div className="text-2xl font-bold text-green-400">{batchResult.started}</div>
+                    <div className="text-xs text-green-400/70">Запущено</div>
+                  </div>
+                  {batchResult.failed > 0 && (
+                    <div className="flex-1 p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-center">
+                      <div className="text-2xl font-bold text-red-400">{batchResult.failed}</div>
+                      <div className="text-xs text-red-400/70">Ошибок</div>
+                    </div>
+                  )}
+                </div>
+
+                {batchResult.errors.length > 0 && (
+                  <div className="p-3 bg-red-500/5 border border-red-500/20 rounded-lg">
+                    <p className="text-sm font-medium text-red-400 mb-2">Ошибки:</p>
+                    {batchResult.errors.map((err, i) => (
+                      <p key={i} className="text-xs text-red-300">{err.url}: {err.error}</p>
+                    ))}
+                  </div>
+                )}
+
+                <button
+                  onClick={() => { setShowBatchModal(false); setBatchResult(null); setBatchTargets(''); setBatchCategory(''); }}
+                  className="w-full py-3 px-4 rounded-xl text-base font-bold text-white bg-slate-700 hover:bg-slate-600 transition-all"
+                >
+                  Закрыть
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
