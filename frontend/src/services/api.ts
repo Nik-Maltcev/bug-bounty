@@ -335,6 +335,7 @@ export async function exportReport(id: string, format: 'md' | 'pdf' = 'md'): Pro
 export interface ScanReportData {
   id: string;
   scan_id: string;
+  report_type: string;  // full, medium, demo
   title: string;
   target_url: string;
   category: string;

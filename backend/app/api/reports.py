@@ -55,6 +55,7 @@ def _report_to_response(report: ScanReport, db: Session) -> dict:
     return {
         "id": report.id,
         "scan_id": report.scan_id,
+        "report_type": report.report_type if hasattr(report, 'report_type') and report.report_type else "full",
         "title": report.title,
         "target_url": target_url or report.target_url,
         "category": report.category,

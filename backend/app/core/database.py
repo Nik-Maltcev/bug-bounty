@@ -64,6 +64,13 @@ def _run_migrations() -> None:
             cursor.execute("ALTER TABLE scans ADD COLUMN category TEXT DEFAULT ''")
             conn.commit()
         
+        # Добавляем report_type в scan_reports если нет
+        cursor.execute("PRAGMA table_info(scan_reports)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if columns and "report_type" not in columns:
+            cursor.execute("ALTER TABLE scan_reports ADD COLUMN report_type TEXT DEFAULT 'full'")
+            conn.commit()
+        
         conn.close()
     except Exception:
         pass  # Игнорируем ошибки миграции

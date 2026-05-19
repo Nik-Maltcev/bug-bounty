@@ -186,13 +186,13 @@ def quick_scan(
 
 
 def _run_ai_and_create_report(scan_id: str, category: str, db: Session):
-    """Запускает AI-анализ и создаёт редактируемый отчёт."""
+    """Запускает AI-анализ и создаёт 3 уровня отчётов: full, medium, demo."""
     import os
     import httpx as httpx_client
     
     from app.models.database import ScanReport, VulnerabilityRecord
     
-    logger.info("Starting AI analysis for scan %s", scan_id)
+    logger.info("Starting AI report generation for scan %s", scan_id)
     
     # Получаем уязвимости скана
     vulns = db.query(VulnerabilityRecord).filter(VulnerabilityRecord.scan_id == scan_id).all()
@@ -209,55 +209,48 @@ def _run_ai_and_create_report(scan_id: str, category: str, db: Session):
         if asset:
             target_url = asset.target
     
-    # Формируем данные для AI
-    vuln_summary = []
+    # Формируем данные
+    vuln_details = []
     severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "informational": 0}
     
     for v in vulns:
         severity_counts[v.severity] = severity_counts.get(v.severity, 0) + 1
-        vuln_summary.append(f"- [{v.severity.upper()}] {v.vulnerability_type}: {v.description[:200]}")
+        vuln_details.append({
+            "type": v.vulnerability_type,
+            "severity": v.severity,
+            "description": v.description[:300],
+            "remediation": v.remediation[:200] if v.remediation else "",
+        })
     
-    vuln_text = "\n".join(vuln_summary[:30])  # Лимит для промпта
+    vuln_text_full = "\n".join([
+        f"- [{v['severity'].upper()}] {v['type']}: {v['description']}" 
+        for v in vuln_details[:30]
+    ])
     
-    # AI-генерация отчёта
+    # AI-генерация полного отчёта
     api_key = os.environ.get("DEEPSEEK_API_KEY", "")
     if not api_key:
-        logger.warning("No DEEPSEEK_API_KEY, creating report without AI")
-        # Создаём отчёт без AI
-        report = ScanReport(
-            id=str(uuid.uuid4()),
-            scan_id=scan_id,
-            title=f"Отчёт: {target_url}",
-            target_url=target_url,
-            category=category,
-            executive_summary=f"Обнаружено {len(vulns)} уязвимостей.",
-            findings_summary=vuln_text,
-            risk_assessment="Требуется анализ.",
-            compliance_notes="",
-            recommendations="Требуется анализ.",
-            conclusion="",
-            status="draft",
-        )
-        db.add(report)
-        db.commit()
+        logger.warning("No DEEPSEEK_API_KEY, creating basic reports")
+        _create_basic_reports(scan_id, target_url, category, vulns, vuln_text_full, severity_counts, db)
         return
     
-    prompt = f"""Ты — эксперт по кибербезопасности. Составь профессиональный отчёт на русском языке.
+    prompt = f"""Ты — эксперт по кибербезопасности. Составь ПОЛНЫЙ профессиональный отчёт на русском языке.
 
 Цель: {target_url}
 Отрасль: {category or 'общая'}
 Найдено уязвимостей: {len(vulns)} (критических: {severity_counts['critical']}, высоких: {severity_counts['high']}, средних: {severity_counts['medium']}, низких: {severity_counts['low']})
 
 Уязвимости:
-{vuln_text}
+{vuln_text_full}
 
-Напиши отчёт в формате JSON:
+Напиши ПОЛНЫЙ отчёт в формате JSON:
 {{
-  "executive_summary": "Краткое резюме для руководства (3-5 предложений)",
-  "risk_assessment": "Оценка рисков для бизнеса с учётом отрасли, потенциальные потери в рублях",
-  "compliance_notes": "Нарушения 152-ФЗ, 187-ФЗ, PCI DSS если применимо",
-  "recommendations": "Конкретные рекомендации по исправлению (пошагово)",
-  "conclusion": "Заключение и общая оценка безопасности"
+  "executive_summary": "Резюме для руководства (5-7 предложений, с цифрами рисков в рублях)",
+  "findings_detailed": "Детальное описание КАЖДОЙ найденной уязвимости: что это, где найдено, как эксплуатировать, какой риск",
+  "risk_assessment": "Оценка рисков для бизнеса: потенциальные потери в рублях, сценарии атак, влияние на репутацию",
+  "compliance_notes": "Конкретные нарушения 152-ФЗ, 187-ФЗ, PCI DSS с указанием статей и штрафов",
+  "recommendations": "ПОШАГОВЫЕ инструкции по устранению каждой уязвимости: конкретные команды, конфиги, код",
+  "conclusion": "Заключение: общая оценка, приоритеты исправления, сроки"
 }}
 
 Отвечай ТОЛЬКО JSON, без markdown."""
@@ -270,59 +263,130 @@ def _run_ai_and_create_report(scan_id: str, category: str, db: Session):
                 "model": "deepseek-chat",
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.3,
-                "max_tokens": 3000,
+                "max_tokens": 4000,
             },
             timeout=120.0,
         )
         
-        import json
         ai_text = response.json()["choices"][0]["message"]["content"]
-        # Убираем markdown обёртку если есть
         ai_text = ai_text.strip()
         if ai_text.startswith("```"):
             ai_text = ai_text.split("\n", 1)[1] if "\n" in ai_text else ai_text[3:]
             if ai_text.endswith("```"):
                 ai_text = ai_text[:-3]
         
-        ai_data = json.loads(ai_text)
+        import json as json_mod
+        ai_data = json_mod.loads(ai_text)
         
-        report = ScanReport(
+        # === 1. ПОЛНЫЙ ОТЧЁТ ===
+        full_report = ScanReport(
             id=str(uuid.uuid4()),
             scan_id=scan_id,
-            title=f"Отчёт: {target_url}",
+            report_type="full",
+            title=f"[Полный] {target_url}",
             target_url=target_url,
             category=category,
             executive_summary=ai_data.get("executive_summary", ""),
-            findings_summary=vuln_text,
+            findings_summary=ai_data.get("findings_detailed", vuln_text_full),
             risk_assessment=ai_data.get("risk_assessment", ""),
             compliance_notes=ai_data.get("compliance_notes", ""),
             recommendations=ai_data.get("recommendations", ""),
             conclusion=ai_data.get("conclusion", ""),
             status="draft",
         )
-        db.add(report)
+        db.add(full_report)
+        
+        # === 2. СРЕДНИЙ ОТЧЁТ (без рекомендаций по устранению) ===
+        medium_findings = vuln_text_full  # Уязвимости видны
+        medium_recommendations = "⚠️ Детальные инструкции по устранению доступны в полной версии отчёта.\n\nДля получения пошаговых рекомендаций по исправлению каждой уязвимости обратитесь к нашим специалистам."
+        
+        medium_report = ScanReport(
+            id=str(uuid.uuid4()),
+            scan_id=scan_id,
+            report_type="medium",
+            title=f"[Технический] {target_url}",
+            target_url=target_url,
+            category=category,
+            executive_summary=ai_data.get("executive_summary", ""),
+            findings_summary=ai_data.get("findings_detailed", vuln_text_full),
+            risk_assessment=ai_data.get("risk_assessment", ""),
+            compliance_notes=ai_data.get("compliance_notes", ""),
+            recommendations=medium_recommendations,
+            conclusion="Для получения полного отчёта с пошаговыми инструкциями по устранению свяжитесь с нами.",
+            status="draft",
+        )
+        db.add(medium_report)
+        
+        # === 3. ДЕМО ОТЧЁТ (только статистика и риски, без деталей) ===
+        demo_findings = f"""Обнаружено {len(vulns)} уязвимостей:
+• Критических: {severity_counts['critical']}
+• Высоких: {severity_counts['high']}
+• Средних: {severity_counts['medium']}
+• Низких: {severity_counts['low']}
+
+Примеры обнаруженных проблем:
+- {vuln_details[0]['type']} ({vuln_details[0]['severity'].upper()})"""
+        
+        if len(vuln_details) > 1:
+            demo_findings += f"\n- {vuln_details[1]['type']} ({vuln_details[1]['severity'].upper()})"
+        
+        demo_findings += "\n\n... и ещё " + str(max(0, len(vulns) - 2)) + " уязвимостей"
+        demo_findings += "\n\n⚠️ Детальная информация о каждой уязвимости, шаги воспроизведения и доказательства доступны в полной версии отчёта."
+        
+        demo_report = ScanReport(
+            id=str(uuid.uuid4()),
+            scan_id=scan_id,
+            report_type="demo",
+            title=f"[Демо] {target_url}",
+            target_url=target_url,
+            category=category,
+            executive_summary=ai_data.get("executive_summary", ""),
+            findings_summary=demo_findings,
+            risk_assessment=ai_data.get("risk_assessment", ""),
+            compliance_notes="Выявлены потенциальные нарушения требований законодательства РФ. Детальный анализ доступен в полной версии.",
+            recommendations="Полный перечень рекомендаций с конкретными командами и конфигурациями доступен после оформления услуги.",
+            conclusion="Обнаружены серьёзные уязвимости, требующие немедленного внимания. Свяжитесь с нами для получения полного отчёта и плана устранения.",
+            status="draft",
+        )
+        db.add(demo_report)
+        
         db.commit()
-        logger.info("AI report created for scan %s", scan_id)
+        logger.info("3 reports (full/medium/demo) created for scan %s", scan_id)
         
     except Exception as e:
         logger.error("AI report generation failed: %s", e)
-        # Создаём базовый отчёт без AI
-        report = ScanReport(
-            id=str(uuid.uuid4()),
-            scan_id=scan_id,
-            title=f"Отчёт: {target_url}",
-            target_url=target_url,
-            category=category,
-            executive_summary=f"Обнаружено {len(vulns)} уязвимостей. AI-анализ недоступен.",
-            findings_summary=vuln_text,
-            risk_assessment="",
-            compliance_notes="",
-            recommendations="",
-            conclusion="",
-            status="draft",
-        )
-        db.add(report)
-        db.commit()
+        _create_basic_reports(scan_id, target_url, category, vulns, vuln_text_full, severity_counts, db)
+
+
+def _create_basic_reports(scan_id, target_url, category, vulns, vuln_text, severity_counts, db):
+    """Создаёт 3 базовых отчёта без AI."""
+    from app.models.database import ScanReport
+    
+    # Full
+    db.add(ScanReport(
+        id=str(uuid.uuid4()), scan_id=scan_id, report_type="full",
+        title=f"[Полный] {target_url}", target_url=target_url, category=category,
+        executive_summary=f"Обнаружено {len(vulns)} уязвимостей.",
+        findings_summary=vuln_text, risk_assessment="Требуется анализ.",
+        recommendations="Требуется анализ.", status="draft",
+    ))
+    # Medium
+    db.add(ScanReport(
+        id=str(uuid.uuid4()), scan_id=scan_id, report_type="medium",
+        title=f"[Технический] {target_url}", target_url=target_url, category=category,
+        executive_summary=f"Обнаружено {len(vulns)} уязвимостей.",
+        findings_summary=vuln_text, risk_assessment="Требуется анализ.",
+        recommendations="Детальные инструкции доступны в полной версии.", status="draft",
+    ))
+    # Demo
+    demo_text = f"Обнаружено {len(vulns)} уязвимостей: критических {severity_counts['critical']}, высоких {severity_counts['high']}, средних {severity_counts['medium']}."
+    db.add(ScanReport(
+        id=str(uuid.uuid4()), scan_id=scan_id, report_type="demo",
+        title=f"[Демо] {target_url}", target_url=target_url, category=category,
+        executive_summary=demo_text, findings_summary="Детали доступны в полной версии.",
+        risk_assessment="Требуется анализ.", recommendations="Доступно после оформления услуги.", status="draft",
+    ))
+    db.commit()
 
 
 @router.post("/api/scans/batch", status_code=201)

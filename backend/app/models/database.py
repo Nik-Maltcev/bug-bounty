@@ -307,6 +307,7 @@ class ScanReport(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     scan_id: Mapped[str] = mapped_column(String, ForeignKey("scans.id"), nullable=False)
+    report_type: Mapped[str] = mapped_column(String, default="full")  # full, medium, demo
     title: Mapped[str] = mapped_column(String, nullable=False)
     target_url: Mapped[str] = mapped_column(String, default="")
     category: Mapped[str] = mapped_column(String, default="")  # отрасль
