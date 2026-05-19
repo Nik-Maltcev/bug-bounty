@@ -407,3 +407,4 @@ export async function exportAuditLog(filters?: {
 }
 
 export default api;
+export { api };

@@ -7,7 +7,8 @@ import {
   FileText,
   ListOrdered,
   LogOut,
-  Shield
+  Shield,
+  Users
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -16,6 +17,7 @@ const navItems = [
   { to: '/app/scans', label: 'Сканирования', icon: Search },
   { to: '/app/vulnerabilities', label: 'Уязвимости', icon: ShieldAlert },
   { to: '/app/reports', label: 'Отчёты', icon: FileText },
+  { to: '/app/clients', label: 'CRM', icon: Users },
   { to: '/app/audit', label: 'Аудит', icon: ListOrdered },
 ];
 

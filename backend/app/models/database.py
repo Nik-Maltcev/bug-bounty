@@ -322,6 +322,25 @@ class ScanReport(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
 
+class Client(Base):
+    """Клиент CRM."""
+
+    __tablename__ = "clients"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    company_name: Mapped[str] = mapped_column(String, nullable=False)
+    contact_name: Mapped[str] = mapped_column(String, default="")
+    email: Mapped[str] = mapped_column(String, default="")
+    phone: Mapped[str] = mapped_column(String, default="")
+    website: Mapped[str] = mapped_column(String, default="")
+    category: Mapped[str] = mapped_column(String, default="")  # отрасль
+    status: Mapped[str] = mapped_column(String, default="new")  # new, scanning, report_ready, demo_sent, paid, done
+    notes: Mapped[str] = mapped_column(Text, default="")
+    scan_id: Mapped[str | None] = mapped_column(String, nullable=True)  # связь со сканом
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+
+
 # =============================================================================
 # AI-Driven Scan (Stage 2) — ORM-модели
 # =============================================================================
