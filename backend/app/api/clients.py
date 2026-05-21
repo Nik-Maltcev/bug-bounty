@@ -277,6 +277,71 @@ def export_csv(
     )
 
 
+@router.get("/categories")
+def list_categories(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[dict]:
+    """Список всех категорий с количеством клиентов."""
+    from sqlalchemy import func
+    
+    results = db.query(
+        Client.category, func.count(Client.id)
+    ).filter(Client.category != "").group_by(Client.category).all()
+    
+    return [{"category": cat, "count": count} for cat, count in results]
+
+
+@router.post("/scan-category")
+def scan_by_category(
+    body: ScanByCategoryRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Запустить массовое сканирование всех клиентов в категории."""
+    clients = db.query(Client).filter(Client.category == body.category).all()
+    
+    if not clients:
+        raise HTTPException(status_code=404, detail=f"Нет клиентов в категории '{body.category}'")
+    
+    # Собираем сайты
+    targets = []
+    for c in clients:
+        if c.website:
+            url = c.website.strip()
+            if not url.startswith('http'):
+                url = 'https://' + url
+            targets.append(url)
+    
+    if not targets:
+        raise HTTPException(status_code=400, detail="Нет сайтов для сканирования в этой категории")
+    
+    # Вызываем batch scan
+    from app.api.scans import BatchScanRequest, batch_scan
+    
+    batch_body = BatchScanRequest(
+        targets=targets,
+        category=body.category,
+        scan_type="web",
+        auto_ai_analysis=body.auto_ai_analysis,
+    )
+    
+    result = batch_scan(batch_body, db, current_user)
+    
+    # Обновляем статус клиентов
+    for c in clients:
+        if c.website:
+            c.status = "scanning"
+    db.commit()
+    
+    return {
+        "category": body.category,
+        "clients_count": len(clients),
+        "scans_started": result["started"],
+        "errors": result["errors"],
+    }
+
+
 @router.get("/{client_id}")
 def get_client(
     client_id: str,
@@ -345,69 +410,3 @@ def delete_client(
     db.delete(client)
     db.commit()
     return {"status": "deleted"}
-
-
-
-@router.post("/scan-category")
-def scan_by_category(
-    body: ScanByCategoryRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> dict:
-    """Запустить массовое сканирование всех клиентов в категории."""
-    clients = db.query(Client).filter(Client.category == body.category).all()
-    
-    if not clients:
-        raise HTTPException(status_code=404, detail=f"Нет клиентов в категории '{body.category}'")
-    
-    # Собираем сайты
-    targets = []
-    for c in clients:
-        if c.website:
-            url = c.website.strip()
-            if not url.startswith('http'):
-                url = 'https://' + url
-            targets.append(url)
-    
-    if not targets:
-        raise HTTPException(status_code=400, detail="Нет сайтов для сканирования в этой категории")
-    
-    # Вызываем batch scan
-    from app.api.scans import BatchScanRequest, batch_scan
-    
-    batch_body = BatchScanRequest(
-        targets=targets,
-        category=body.category,
-        scan_type="web",
-        auto_ai_analysis=body.auto_ai_analysis,
-    )
-    
-    result = batch_scan(batch_body, db, current_user)
-    
-    # Обновляем статус клиентов
-    for c in clients:
-        if c.website:
-            c.status = "scanning"
-    db.commit()
-    
-    return {
-        "category": body.category,
-        "clients_count": len(clients),
-        "scans_started": result["started"],
-        "errors": result["errors"],
-    }
-
-
-@router.get("/categories")
-def list_categories(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> list[dict]:
-    """Список всех категорий с количеством клиентов."""
-    from sqlalchemy import func
-    
-    results = db.query(
-        Client.category, func.count(Client.id)
-    ).filter(Client.category != "").group_by(Client.category).all()
-    
-    return [{"category": cat, "count": count} for cat, count in results]
