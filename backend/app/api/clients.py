@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from fastapi import UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -57,6 +58,12 @@ class ClientUpdate(BaseModel):
 class ClientBulkCreate(BaseModel):
     """Массовый импорт клиентов."""
     clients: list[ClientCreate]
+
+
+class ScanByCategoryRequest(BaseModel):
+    """Запуск сканов для всех клиентов категории."""
+    category: str
+    auto_ai_analysis: bool = True
 
 
 class StatusUpdate(BaseModel):
@@ -125,6 +132,11 @@ def create_client(
     current_user: User = Depends(get_current_user),
 ) -> dict:
     """Создать клиента."""
+    # Нормализуем категорию (не капсом)
+    category = body.category.strip()
+    if category.isupper():
+        category = category.capitalize()
+    
     client = Client(
         id=str(uuid.uuid4()),
         company_name=body.company_name,
@@ -132,7 +144,7 @@ def create_client(
         email=body.email,
         phone=body.phone,
         website=body.website,
-        category=body.category,
+        category=category,
         status=body.status,
         notes=body.notes,
     )
@@ -154,6 +166,11 @@ def bulk_create_clients(
     
     created = 0
     for c in body.clients:
+        # Нормализуем категорию
+        category = c.category.strip() if c.category else ""
+        if category.isupper():
+            category = category.capitalize()
+        
         client = Client(
             id=str(uuid.uuid4()),
             company_name=c.company_name,
@@ -161,7 +178,7 @@ def bulk_create_clients(
             email=c.email,
             phone=c.phone,
             website=c.website,
-            category=c.category,
+            category=category,
             status=c.status,
             notes=c.notes,
         )
@@ -170,6 +187,59 @@ def bulk_create_clients(
     
     db.commit()
     return {"created": created}
+
+
+@router.post("/import-csv", status_code=201)
+async def import_csv(
+    file: UploadFile,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Импорт клиентов из CSV файла (формат: Категория, #, Компания, Сайт, Примечание)."""
+    content = await file.read()
+    text = content.decode("utf-8-sig")
+    
+    reader = csv.reader(io.StringIO(text))
+    rows = list(reader)
+    
+    if not rows:
+        raise HTTPException(status_code=400, detail="Пустой файл")
+    
+    # Пропускаем заголовок
+    data_rows = rows[1:] if rows[0][0].lower().startswith("категор") else rows
+    
+    created = 0
+    for row in data_rows:
+        if len(row) < 4:
+            continue
+        
+        category_raw = row[0].strip()
+        company = row[2].strip() if len(row) > 2 else ""
+        website = row[3].strip() if len(row) > 3 else ""
+        notes = row[4].strip() if len(row) > 4 else ""
+        
+        if not company and not website:
+            continue
+        
+        # Нормализуем категорию
+        # "Банки (без Сбербанка)" -> "Банки"
+        category = category_raw.split("(")[0].strip()
+        if category.isupper():
+            category = category.capitalize()
+        
+        client = Client(
+            id=str(uuid.uuid4()),
+            company_name=company or website,
+            website=website,
+            category=category,
+            notes=notes,
+            status="new",
+        )
+        db.add(client)
+        created += 1
+    
+    db.commit()
+    return {"created": created, "filename": file.filename}
 
 
 @router.get("/export/csv")
@@ -275,3 +345,69 @@ def delete_client(
     db.delete(client)
     db.commit()
     return {"status": "deleted"}
+
+
+
+@router.post("/scan-category")
+def scan_by_category(
+    body: ScanByCategoryRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Запустить массовое сканирование всех клиентов в категории."""
+    clients = db.query(Client).filter(Client.category == body.category).all()
+    
+    if not clients:
+        raise HTTPException(status_code=404, detail=f"Нет клиентов в категории '{body.category}'")
+    
+    # Собираем сайты
+    targets = []
+    for c in clients:
+        if c.website:
+            url = c.website.strip()
+            if not url.startswith('http'):
+                url = 'https://' + url
+            targets.append(url)
+    
+    if not targets:
+        raise HTTPException(status_code=400, detail="Нет сайтов для сканирования в этой категории")
+    
+    # Вызываем batch scan
+    from app.api.scans import BatchScanRequest, batch_scan
+    
+    batch_body = BatchScanRequest(
+        targets=targets,
+        category=body.category,
+        scan_type="web",
+        auto_ai_analysis=body.auto_ai_analysis,
+    )
+    
+    result = batch_scan(batch_body, db, current_user)
+    
+    # Обновляем статус клиентов
+    for c in clients:
+        if c.website:
+            c.status = "scanning"
+    db.commit()
+    
+    return {
+        "category": body.category,
+        "clients_count": len(clients),
+        "scans_started": result["started"],
+        "errors": result["errors"],
+    }
+
+
+@router.get("/categories")
+def list_categories(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[dict]:
+    """Список всех категорий с количеством клиентов."""
+    from sqlalchemy import func
+    
+    results = db.query(
+        Client.category, func.count(Client.id)
+    ).filter(Client.category != "").group_by(Client.category).all()
+    
+    return [{"category": cat, "count": count} for cat, count in results]

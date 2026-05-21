@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { 
   Search, Users, Plus, X, Download, Upload, Edit3, Trash2, 
-  Loader2, Globe, Mail, Phone, Tag, Building2, ChevronLeft, ChevronRight
+  Loader2, Globe, Mail, Phone, Tag, Building2, ChevronLeft, ChevronRight,
+  Play, Rocket
 } from 'lucide-react';
 import clsx from 'clsx';
 import { api } from '../services/api';
@@ -40,9 +41,11 @@ export default function ClientsPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showBulkModal, setShowBulkModal] = useState(false);
   const [editingClient, setEditingClient] = useState<ClientData | null>(null);
+  const [categories, setCategories] = useState<{ category: string; count: number }[]>([]);
+  const [scanningCategory, setScanningCategory] = useState<string | null>(null);
   const limit = 25;
 
-  useEffect(() => { loadClients(); }, [page, filterStatus]);
+  useEffect(() => { loadClients(); loadCategories(); }, [page, filterStatus]);
 
   const loadClients = async () => {
     setLoading(true);
@@ -55,6 +58,27 @@ export default function ClientsPage() {
       setTotal(res.data.total);
     } catch { /* ignore */ }
     finally { setLoading(false); }
+  };
+
+  const loadCategories = async () => {
+    try {
+      const res = await api.get('/api/clients/categories');
+      setCategories(res.data);
+    } catch { /* ignore */ }
+  };
+
+  const handleScanCategory = async (category: string) => {
+    if (!confirm(`Запустить сканирование всех сайтов в категории "${category}"?`)) return;
+    setScanningCategory(category);
+    try {
+      const res = await api.post('/api/clients/scan-category', { category, auto_ai_analysis: true });
+      alert(`Запущено ${res.data.scans_started} сканов для категории "${category}"`);
+      loadClients();
+    } catch (err: unknown) {
+      alert((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Ошибка запуска');
+    } finally {
+      setScanningCategory(null);
+    }
   };
 
   const handleSearch = (e: FormEvent) => {
@@ -141,6 +165,35 @@ export default function ClientsPage() {
         </select>
         <span className="flex items-center text-sm text-slate-500">{total} клиентов</span>
       </div>
+
+      {/* Categories with scan buttons */}
+      {categories.length > 0 && (
+        <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4">
+          <h3 className="text-sm font-medium text-slate-400 mb-3 flex items-center gap-2">
+            <Tag className="w-4 h-4" /> Категории
+          </h3>
+          <div className="flex flex-wrap gap-2">
+            {categories.map(cat => (
+              <div key={cat.category} className="flex items-center gap-1 bg-slate-800 rounded-lg px-3 py-1.5 border border-slate-700">
+                <span className="text-sm text-slate-300">{cat.category}</span>
+                <span className="text-xs text-slate-500 ml-1">({cat.count})</span>
+                <button
+                  onClick={() => handleScanCategory(cat.category)}
+                  disabled={scanningCategory === cat.category}
+                  className="ml-2 p-1 text-green-400 hover:text-green-300 hover:bg-green-500/10 rounded transition-colors disabled:opacity-50"
+                  title={`Запустить скан для всех в "${cat.category}"`}
+                >
+                  {scanningCategory === cat.category ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Rocket className="w-3.5 h-3.5" />
+                  )}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Table */}
       <div className="bg-slate-900/60 border border-slate-800 rounded-2xl overflow-hidden">
@@ -320,12 +373,28 @@ function BulkImportModal({ onClose, onDone }: { onClose: () => void; onDone: () 
   const [category, setCategory] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{ created: number } | null>(null);
+  const [mode, setMode] = useState<'text' | 'csv'>('csv');
+
+  const handleCsvUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    setLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await api.post('/api/clients/import-csv', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setResult(res.data);
+    } catch { alert('Ошибка импорта CSV'); }
+    finally { setLoading(false); }
+  };
 
   const handleImport = async () => {
     const lines = text.split('\n').filter(l => l.trim());
     if (!lines.length) return;
 
-    // Парсим: каждая строка — "компания, сайт, email, телефон" или просто "сайт"
     const clients = lines.map(line => {
       const parts = line.split(/[,;\t]/).map(p => p.trim());
       if (parts.length >= 4) {
@@ -333,7 +402,6 @@ function BulkImportModal({ onClose, onDone }: { onClose: () => void; onDone: () 
       } else if (parts.length >= 2) {
         return { company_name: parts[0], website: parts[1], email: parts[2] || '', phone: '', category };
       } else {
-        // Одно значение — считаем сайтом и компанией
         const val = parts[0];
         return { company_name: val, website: val, email: '', phone: '', category };
       }
@@ -351,29 +419,53 @@ function BulkImportModal({ onClose, onDone }: { onClose: () => void; onDone: () 
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 max-w-lg w-full mx-4">
         <div className="flex items-center justify-between mb-6">
-          <h3 className="text-xl font-bold text-white flex items-center gap-2"><Upload className="w-5 h-5 text-blue-400" />Массовый импорт</h3>
+          <h3 className="text-xl font-bold text-white flex items-center gap-2"><Upload className="w-5 h-5 text-blue-400" />Импорт клиентов</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-white"><X className="w-5 h-5" /></button>
         </div>
 
         {!result ? (
           <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">Список (по строке: компания, сайт, email, телефон)</label>
-              <textarea
-                value={text} onChange={e => setText(e.target.value)}
-                rows={10} placeholder={"ООО Рога, roga.ru, info@roga.ru, +79991234567\nООО Копыта, kopyta.com\nsite.ru"}
-                className="w-full px-4 py-3 border border-slate-700 rounded-xl bg-slate-800/50 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 font-mono text-sm"
-              />
-              <p className="text-xs text-slate-500 mt-1">{text.split('\n').filter(l => l.trim()).length} записей</p>
+            {/* Mode tabs */}
+            <div className="flex gap-2 bg-slate-800 rounded-lg p-1">
+              <button onClick={() => setMode('csv')} className={clsx("flex-1 py-2 text-sm rounded-md transition-colors", mode === 'csv' ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white")}>
+                CSV файл
+              </button>
+              <button onClick={() => setMode('text')} className={clsx("flex-1 py-2 text-sm rounded-md transition-colors", mode === 'text' ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white")}>
+                Текст
+              </button>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">Категория для всех</label>
-              <input type="text" value={category} onChange={e => setCategory(e.target.value)} placeholder="финтех, e-commerce..."
-                className="w-full px-4 py-2 border border-slate-700 rounded-lg bg-slate-800/50 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 text-sm" />
-            </div>
-            <button onClick={handleImport} disabled={loading || !text.trim()} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-colors disabled:opacity-50">
-              {loading ? 'Импорт...' : `Импортировать (${text.split('\n').filter(l => l.trim()).length})`}
-            </button>
+
+            {mode === 'csv' ? (
+              <div className="space-y-3">
+                <p className="text-sm text-slate-400">Загрузите CSV файл (формат: Категория, №, Компания, Сайт, Примечание)</p>
+                <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-slate-700 rounded-xl cursor-pointer hover:border-blue-500 transition-colors">
+                  <Upload className="w-8 h-8 text-slate-500 mb-2" />
+                  <span className="text-sm text-slate-400">Нажмите для выбора файла</span>
+                  <input type="file" accept=".csv" onChange={handleCsvUpload} className="hidden" disabled={loading} />
+                </label>
+                {loading && <div className="flex items-center justify-center gap-2 text-blue-400"><Loader2 className="w-4 h-4 animate-spin" />Импорт...</div>}
+              </div>
+            ) : (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">Список (по строке: компания, сайт, email, телефон)</label>
+                  <textarea
+                    value={text} onChange={e => setText(e.target.value)}
+                    rows={8} placeholder={"ООО Рога, roga.ru, info@roga.ru, +79991234567\nООО Копыта, kopyta.com\nsite.ru"}
+                    className="w-full px-4 py-3 border border-slate-700 rounded-xl bg-slate-800/50 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 font-mono text-sm"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">{text.split('\n').filter(l => l.trim()).length} записей</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">Категория для всех</label>
+                  <input type="text" value={category} onChange={e => setCategory(e.target.value)} placeholder="финтех, e-commerce..."
+                    className="w-full px-4 py-2 border border-slate-700 rounded-lg bg-slate-800/50 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 text-sm" />
+                </div>
+                <button onClick={handleImport} disabled={loading || !text.trim()} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-colors disabled:opacity-50">
+                  {loading ? 'Импорт...' : `Импортировать (${text.split('\n').filter(l => l.trim()).length})`}
+                </button>
+              </>
+            )}
           </div>
         ) : (
           <div className="text-center space-y-4">
