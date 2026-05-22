@@ -430,7 +430,7 @@ def batch_scan(
             errors.append({"url": target_url, "error": "Некорректный URL"})
             continue
     
-    # Создаём все программы и активы, сканы в статусе pending
+    # Создаём все программы и активы
     scan_queue = []
     
     for target in valid_targets:
@@ -456,21 +456,7 @@ def batch_scan(
         )
         db.add(asset_db)
         
-        # Создаём скан в статусе pending (в очереди)
-        scan_id = str(uuid.uuid4())
-        scan_record = Scan(
-            id=scan_id,
-            program_id=program_id,
-            asset_id=asset_id,
-            status="queued",
-            current_stage="в очереди",
-            percent_complete=0,
-            category=body.category,
-        )
-        db.add(scan_record)
-        
         scan_queue.append({
-            "scan_id": scan_id,
             "program_id": program_id,
             "asset_id": asset_id,
             "target_url": target['url'],
@@ -487,16 +473,6 @@ def batch_scan(
         for item in queue:
             local_db = SessionLocal()
             try:
-                # Обновляем статус на running
-                scan_rec = local_db.query(Scan).filter(Scan.id == item['scan_id']).first()
-                if not scan_rec:
-                    continue
-                
-                scan_rec.status = "running"
-                scan_rec.current_stage = "initializing"
-                scan_rec.started_at = datetime.now()
-                local_db.commit()
-                
                 # Создаём Asset schema
                 asset = Asset(
                     id=item['asset_id'],
@@ -516,27 +492,24 @@ def batch_scan(
                 compliance_manager = ComplianceManager()
                 rules = compliance_manager.load_program_rules(item['program_id'], local_db)
                 
-                # Запускаем скан (блокирующий — ждём завершения)
-                _scanner.start_scan(asset, scan_config, compliance_manager, rules, local_db)
+                # Запускаем скан (start_scan сам создаёт запись в БД)
+                progress = _scanner.start_scan(asset, scan_config, compliance_manager, rules, local_db)
+                
+                # Обновляем категорию
+                scan_rec = local_db.query(Scan).filter(Scan.id == progress.scan_id).first()
+                if scan_rec:
+                    scan_rec.category = category
+                    local_db.commit()
                 
                 # После Stage 1 — запускаем AI-анализ если включено
                 if auto_ai:
                     try:
-                        _run_ai_and_create_report(item['scan_id'], category, local_db)
+                        _run_ai_and_create_report(progress.scan_id, category, local_db)
                     except Exception as e:
-                        logger.error("AI analysis failed for scan %s: %s", item['scan_id'], e)
+                        logger.error("AI analysis failed for scan %s: %s", progress.scan_id, e)
                 
             except Exception as e:
-                # Помечаем как failed
-                try:
-                    scan_rec = local_db.query(Scan).filter(Scan.id == item['scan_id']).first()
-                    if scan_rec:
-                        scan_rec.status = "failed"
-                        scan_rec.current_stage = f"error: {str(e)[:100]}"
-                        scan_rec.completed_at = datetime.now()
-                        local_db.commit()
-                except Exception:
-                    pass
+                logger.error("Batch scan failed for %s: %s", item['target_url'], e)
             finally:
                 local_db.close()
     
@@ -548,7 +521,7 @@ def batch_scan(
     )
     thread.start()
     
-    results = [{"scan_id": s["scan_id"], "target_url": s["target_url"], "status": "queued"} for s in scan_queue]
+    results = [{"target_url": s["target_url"], "status": "queued"} for s in scan_queue]
     
     return {
         "total": len(results) + len(errors),
