@@ -185,6 +185,83 @@ def quick_scan(
     }
 
 
+def _run_stage2_and_reports(scan_id: str, item: dict, category: str, db: Session):
+    """Запускает полный AI Stage 2, затем генерирует 3 отчёта."""
+    import os
+    from app.models.database import VulnerabilityRecord, AIScanState
+    from app.models.schemas import RawFinding
+    from app.services.ai.ai_scanner import AIScanner
+    from app.services.ai.llm_provider_manager import LLMProviderManager
+    from app.models.ai_schemas import LLMConfig, ProviderType
+    
+    logger.info("Starting Stage 2 for scan %s (%s)", scan_id, item['target_url'])
+    
+    # Получаем уязвимости Stage 1
+    vulns = db.query(VulnerabilityRecord).filter(VulnerabilityRecord.scan_id == scan_id).all()
+    if not vulns:
+        logger.info("No vulns for Stage 2, skipping: %s", scan_id)
+        return
+    
+    # Проверяем API ключ
+    deepseek_key = os.environ.get("DEEPSEEK_API_KEY")
+    if not deepseek_key:
+        logger.warning("No DEEPSEEK_API_KEY, skipping Stage 2")
+        _run_ai_and_create_report(scan_id, category, db)
+        return
+    
+    # Конвертируем уязвимости в RawFinding
+    stage1_results = []
+    for v in vulns:
+        raw_data = {}
+        if v.raw_data_json:
+            try:
+                raw_data = json.loads(v.raw_data_json)
+            except Exception:
+                pass
+        raw_data.update({"severity": v.severity, "source": "stage1_scan"})
+        
+        stage1_results.append(RawFinding(
+            vulnerability_type=v.vulnerability_type,
+            description=v.description or "",
+            evidence=v.evidence or "",
+            affected_asset_id=item['asset_id'],
+            raw_data=raw_data,
+        ))
+    
+    # Настраиваем LLM
+    llm_config = LLMConfig(
+        provider=ProviderType.DEEPSEEK,
+        api_key=deepseek_key,
+        base_url="https://api.deepseek.com",
+        model="deepseek-chat",
+        temperature=0.3,
+    )
+    
+    llm_manager = LLMProviderManager(db_session=db)
+    llm_manager.save_provider_config(llm_config)
+    
+    # Запускаем Stage 2
+    ai_scanner = AIScanner(llm_manager=llm_manager, db=db)
+    
+    try:
+        result = ai_scanner.run_stage2(
+            scan_id=scan_id,
+            stage1_results=stage1_results,
+            target_url=item['target_url'],
+            program_id=item['program_id'],
+            supervised_mode=False,
+            max_iterations=3,
+            max_requests=30,
+            rate_limit=3.0,
+        )
+        logger.info("Stage 2 completed for %s: %s findings", scan_id, len(result.findings))
+    except Exception as e:
+        logger.error("Stage 2 execution error for %s: %s", scan_id, e)
+    
+    # Генерируем 3 отчёта (на основе всех уязвимостей — Stage 1 + Stage 2)
+    _run_ai_and_create_report(scan_id, category, db)
+
+
 def _run_ai_and_create_report(scan_id: str, category: str, db: Session):
     """Запускает AI-анализ и создаёт 3 уровня отчётов: full, medium, demo."""
     import os
@@ -501,12 +578,17 @@ def batch_scan(
                     scan_rec.category = category
                     local_db.commit()
                 
-                # После Stage 1 — запускаем AI-анализ если включено
-                if auto_ai:
+                # После Stage 1 — запускаем AI Stage 2 + генерируем отчёты
+                if auto_ai and progress.status.value == "completed":
                     try:
-                        _run_ai_and_create_report(progress.scan_id, category, local_db)
+                        _run_stage2_and_reports(progress.scan_id, item, category, local_db)
                     except Exception as e:
-                        logger.error("AI analysis failed for scan %s: %s", progress.scan_id, e)
+                        logger.error("AI Stage 2 failed for scan %s: %s", progress.scan_id, e)
+                        # Всё равно генерируем отчёты на основе Stage 1
+                        try:
+                            _run_ai_and_create_report(progress.scan_id, category, local_db)
+                        except Exception as e2:
+                            logger.error("Report generation also failed: %s", e2)
                 
             except Exception as e:
                 logger.error("Batch scan failed for %s: %s", item['target_url'], e)
