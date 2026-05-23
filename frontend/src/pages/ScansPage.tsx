@@ -29,6 +29,9 @@ export default function ScansPage() {
   const [stopping, setStopping] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const LIMIT = 50;
   
   // Batch scan state
   const [showBatchModal, setShowBatchModal] = useState(false);
@@ -41,7 +44,7 @@ export default function ScansPage() {
   // Load scan history
   useEffect(() => {
     loadScans();
-  }, []);
+  }, [page]);
 
   // Auto-refresh scan list when there are running scans
   useEffect(() => {
@@ -57,8 +60,9 @@ export default function ScansPage() {
 
   const loadScans = async () => {
     try {
-      const data = await listScans(20);
+      const data = await listScans(LIMIT, page * LIMIT);
       setScans(data);
+      setHasMore(data.length === LIMIT);
     } catch {
       // ignore
     } finally {
@@ -481,6 +485,30 @@ export default function ScansPage() {
           </div>
         )}
       </section>
+
+      {/* Pagination */}
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-slate-500">
+          Страница {page + 1} {!hasMore && scans.length > 0 ? `(всего ${page * LIMIT + scans.length})` : ''}
+        </span>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setPage(p => Math.max(0, p - 1))}
+            disabled={page === 0}
+            className="px-3 py-1.5 text-sm text-slate-400 hover:text-white bg-slate-800 rounded-lg disabled:opacity-30 transition-colors"
+          >
+            ← Назад
+          </button>
+          <button
+            onClick={() => setPage(p => p + 1)}
+            disabled={!hasMore}
+            className="px-3 py-1.5 text-sm text-slate-400 hover:text-white bg-slate-800 rounded-lg disabled:opacity-30 transition-colors"
+          >
+            Вперёд →
+          </button>
+        </div>
+      </div>
+
       {/* Batch Scan Modal */}
       {showBatchModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">

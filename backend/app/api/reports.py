@@ -76,7 +76,7 @@ def _report_to_response(report: ScanReport, db: Session) -> dict:
 def list_reports(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    limit: int = 50,
+    limit: int = 500,
     offset: int = 0,
 ) -> list[dict]:
     """Список всех отчётов."""
