@@ -36,7 +36,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     Promise.all([
-      listScans(20).catch(() => []),
+      listScans(500).catch(() => []),
       listVulnerabilities().catch(() => []),
     ]).then(([s, v]) => {
       setScans(s);
