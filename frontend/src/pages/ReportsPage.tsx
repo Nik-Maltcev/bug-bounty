@@ -211,6 +211,24 @@ export default function ReportsPage() {
             <option value="date">По дате ↓</option>
           </select>
         </div>
+
+        <button
+          onClick={() => {
+            const rows = filtered.map(g => [g.target_url, g.category, g.findings_count, g.reports.length].join(','));
+            const csv = 'Сайт,Категория,Уязвимостей,Отчётов\n' + rows.join('\n');
+            const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `companies_${minVulns}+vulns.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+          }}
+          className="flex items-center gap-2 bg-slate-900/60 border border-slate-800 rounded-lg px-3 py-2 text-sm text-green-400 hover:text-green-300 hover:border-green-500/30 transition-colors"
+        >
+          <Download className="w-4 h-4" />
+          CSV ({filtered.length})
+        </button>
       </div>
 
       {filtered.length === 0 ? (
