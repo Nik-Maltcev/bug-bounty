@@ -26,6 +26,7 @@ interface GroupedReports {
   scan_id: string;
   reports: ScanReportData[];
   created_at: string | null;
+  findings_count: number;
 }
 
 export default function ReportsPage() {
@@ -33,6 +34,9 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [minVulns, setMinVulns] = useState(0);
+  const [sortBy, setSortBy] = useState<'date' | 'vulns'>('vulns');
+  const [filterCategory, setFilterCategory] = useState('');
 
   useEffect(() => {
     loadReports();
@@ -65,6 +69,7 @@ export default function ReportsPage() {
       target_url: first.target_url,
       category: first.category,
       scan_id: scanId,
+      findings_count: first.findings_count || 0,
       reports: reps.sort((a, b) => {
         const order = { full: 0, medium: 1, demo: 2 };
         return (order[a.report_type as keyof typeof order] ?? 3) - (order[b.report_type as keyof typeof order] ?? 3);
@@ -73,12 +78,25 @@ export default function ReportsPage() {
     });
   }
 
-  // Сортируем по дате (новые сверху)
-  grouped.sort((a, b) => {
-    if (!a.created_at) return 1;
-    if (!b.created_at) return -1;
-    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-  });
+  // Фильтруем
+  let filtered = grouped.filter(g => g.findings_count >= minVulns);
+  if (filterCategory) {
+    filtered = filtered.filter(g => g.category === filterCategory);
+  }
+
+  // Сортируем
+  if (sortBy === 'vulns') {
+    filtered.sort((a, b) => b.findings_count - a.findings_count);
+  } else {
+    filtered.sort((a, b) => {
+      if (!a.created_at) return 1;
+      if (!b.created_at) return -1;
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+  }
+
+  // Уникальные категории для фильтра
+  const categories = [...new Set(grouped.map(g => g.category).filter(Boolean))];
 
   const toggleGroup = (scanId: string) => {
     const next = new Set(expandedGroups);
@@ -148,10 +166,54 @@ export default function ReportsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold tracking-tight text-slate-100">Отчёты</h1>
-        <span className="text-sm text-slate-500">{grouped.length} компаний • {reports.length} отчётов</span>
+        <span className="text-sm text-slate-500">{filtered.length} из {grouped.length} компаний • {reports.length} отчётов</span>
       </div>
 
-      {grouped.length === 0 ? (
+      {/* Filters */}
+      <div className="flex flex-wrap gap-3 items-center">
+        <div className="flex items-center gap-2 bg-slate-900/60 border border-slate-800 rounded-lg px-3 py-2">
+          <ShieldAlert className="w-4 h-4 text-amber-400" />
+          <span className="text-sm text-slate-400">Мин. уязвимостей:</span>
+          <select
+            value={minVulns}
+            onChange={e => setMinVulns(Number(e.target.value))}
+            className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-blue-500"
+          >
+            <option value={0}>Все</option>
+            <option value={5}>5+</option>
+            <option value={10}>10+</option>
+            <option value={20}>20+</option>
+            <option value={50}>50+</option>
+            <option value={100}>100+</option>
+          </select>
+        </div>
+
+        <div className="flex items-center gap-2 bg-slate-900/60 border border-slate-800 rounded-lg px-3 py-2">
+          <Tag className="w-4 h-4 text-blue-400" />
+          <select
+            value={filterCategory}
+            onChange={e => setFilterCategory(e.target.value)}
+            className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-blue-500"
+          >
+            <option value="">Все категории</option>
+            {categories.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+
+        <div className="flex items-center gap-2 bg-slate-900/60 border border-slate-800 rounded-lg px-3 py-2">
+          <span className="text-sm text-slate-400">Сортировка:</span>
+          <select
+            value={sortBy}
+            onChange={e => setSortBy(e.target.value as 'date' | 'vulns')}
+            className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-blue-500"
+          >
+            <option value="vulns">По уязвимостям ↓</option>
+            <option value="date">По дате ↓</option>
+          </select>
+        </div>
+      </div>
+
+      {filtered.length === 0 ? (
         <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-12 text-center">
           <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4">
             <FileText className="w-8 h-8 text-slate-500" />
@@ -161,7 +223,7 @@ export default function ReportsPage() {
         </div>
       ) : (
         <div className="space-y-3">
-          {grouped.map((group) => (
+          {filtered.map((group) => (
             <div key={group.scan_id} className="bg-slate-900/60 border border-slate-800 rounded-2xl overflow-hidden">
               {/* Company header */}
               <button
@@ -178,6 +240,15 @@ export default function ReportsPage() {
                   <div className="min-w-0">
                     <p className="font-semibold text-white truncate">{group.target_url || 'Неизвестный сайт'}</p>
                     <div className="flex items-center gap-3 text-xs text-slate-500 mt-0.5">
+                      {group.findings_count > 0 && (
+                        <span className={clsx("flex items-center gap-1 font-medium", 
+                          group.findings_count >= 20 ? "text-red-400" : 
+                          group.findings_count >= 10 ? "text-amber-400" : "text-slate-400"
+                        )}>
+                          <ShieldAlert className="w-3 h-3" />
+                          {group.findings_count} уязв.
+                        </span>
+                      )}
                       {group.category && (
                         <span className="flex items-center gap-1">
                           <Tag className="w-3 h-3" />
