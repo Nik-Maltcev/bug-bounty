@@ -26,7 +26,11 @@ export default function ReportEditPage() {
     if (id) {
       getScanReport(id)
         .then(setReport)
-        .catch(() => navigate('/app/reports'))
+        .catch((err) => {
+          console.error('Failed to load report:', id, err);
+          alert(`Ошибка загрузки отчёта: ${err?.response?.status || err.message}`);
+          navigate('/app/reports');
+        })
         .finally(() => setLoading(false));
     }
   }, [id]);

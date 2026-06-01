@@ -278,20 +278,20 @@ def generate_report(
     return _report_to_response(report_db)
 
 
-@router.get("/api/reports/{report_id}")
+@router.get("/api/vuln-reports/{report_id}")
 def get_report(
     report_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict:
-    """Просмотр отчёта по ID."""
+    """Просмотр отчёта по уязвимости по ID."""
     row = db.query(ReportDB).filter(ReportDB.id == report_id).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Отчёт не найден")
     return _report_to_response(row)
 
 
-@router.get("/api/reports/{report_id}/export")
+@router.get("/api/vuln-reports/{report_id}/export")
 def export_report(
     report_id: str,
     format: str = Query("md", pattern="^(md|pdf)$"),
