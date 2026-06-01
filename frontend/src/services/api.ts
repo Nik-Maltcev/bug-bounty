@@ -352,7 +352,7 @@ export interface ScanReportData {
 }
 
 export async function listScanReports(): Promise<ScanReportData[]> {
-  const res = await api.get<ScanReportData[]>('/api/reports', { params: { limit: 500 } });
+  const res = await api.get<ScanReportData[]>('/api/reports', { params: { limit: 2000 } });
   return res.data;
 }
 
